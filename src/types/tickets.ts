@@ -1,6 +1,6 @@
 export type TicketPriority = 'baixa' | 'media' | 'alta' | 'urgente';
 export type TicketType = 'setup_questionario' | 'cliente' | 'ajuste' | 'outro';
-export type TicketStatus = 'nao_iniciado' | 'em_andamento' | 'pausado' | 'finalizado';
+export type TicketStatus = 'em_andamento' | 'pausado' | 'finalizado';
 
 export interface Ticket {
   id: string;
@@ -16,6 +16,7 @@ export interface Ticket {
   total_execution_seconds: number;
   total_paused_seconds: number;
   assigned_analyst_id: string | null;
+  pause_started_at: string | null;
 }
 
 export interface TicketStatusLog {
@@ -41,6 +42,35 @@ export interface UserRole {
   role: AppRole;
 }
 
+export interface PauseReason {
+  id: string;
+  title: string;
+  description: string | null;
+  active: boolean;
+  created_by: string;
+  created_at: string;
+}
+
+export interface PauseLog {
+  id: string;
+  ticket_id: string;
+  pause_reason_id: string;
+  description_text: string | null;
+  pause_started_at: string;
+  pause_ended_at: string | null;
+  paused_seconds: number;
+  created_by: string;
+}
+
+export interface PauseEvidence {
+  id: string;
+  ticket_id: string;
+  pause_log_id: string;
+  file_url: string;
+  uploaded_by: string;
+  created_at: string;
+}
+
 export const PRIORITY_LABELS: Record<TicketPriority, string> = {
   baixa: 'Baixa',
   media: 'Média',
@@ -56,7 +86,6 @@ export const TYPE_LABELS: Record<TicketType, string> = {
 };
 
 export const STATUS_LABELS: Record<TicketStatus, string> = {
-  nao_iniciado: 'Não Iniciado',
   em_andamento: 'Em Andamento',
   pausado: 'Pausado',
   finalizado: 'Finalizado',
