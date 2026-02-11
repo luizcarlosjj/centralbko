@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CheckCircle, Send, ArrowLeft } from 'lucide-react';
+import { CheckCircle, Send, Headphones } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PRIORITY_LABELS, TYPE_LABELS, type TicketPriority, type TicketType } from '@/types/tickets';
 
@@ -46,8 +46,8 @@ const PublicTicketForm = () => {
 
   if (ticketId) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <Card className="w-full max-w-md text-center">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-secondary to-background p-4">
+        <Card className="w-full max-w-md text-center border-0 shadow-2xl">
           <CardHeader>
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-success/10">
               <CheckCircle className="h-8 w-8 text-success" />
@@ -58,11 +58,11 @@ const PublicTicketForm = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-lg bg-muted p-4">
+            <div className="rounded-xl bg-muted p-4">
               <p className="text-sm text-muted-foreground">Número do chamado</p>
               <p className="mt-1 font-mono text-lg font-bold text-foreground">{ticketId.slice(0, 8).toUpperCase()}</p>
             </div>
-            <Button onClick={() => { setTicketId(null); setBaseName(''); setRequesterName(''); setPriority(''); setType(''); setDescription(''); }} className="w-full">
+            <Button onClick={() => { setTicketId(null); setBaseName(''); setRequesterName(''); setPriority(''); setType(''); setDescription(''); }} className="w-full transition-all duration-200 hover:shadow-lg">
               Abrir Novo Chamado
             </Button>
             <Link to="/login" className="block text-sm text-muted-foreground hover:text-primary transition-colors">
@@ -75,11 +75,18 @@ const PublicTicketForm = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-lg">
-        <CardHeader>
-          <CardTitle className="text-2xl">Abrir Chamado</CardTitle>
-          <CardDescription>Preencha os dados para registrar um novo chamado</CardDescription>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-secondary to-background p-4">
+      <Card className="w-full max-w-lg border-0 shadow-2xl">
+        <CardHeader className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+              <Headphones className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-2xl">Abrir Chamado</CardTitle>
+              <CardDescription>Preencha os dados para registrar um novo chamado</CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -119,7 +126,7 @@ const PublicTicketForm = () => {
               <Label htmlFor="description">Descrição</Label>
               <Textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} required placeholder="Descreva o chamado em detalhes..." rows={4} />
             </div>
-            <Button type="submit" className="w-full" disabled={submitting || !priority || !type}>
+            <Button type="submit" className="w-full transition-all duration-200 hover:shadow-lg" disabled={submitting || !priority || !type}>
               <Send className="mr-2 h-4 w-4" />
               {submitting ? 'Enviando...' : 'Enviar Chamado'}
             </Button>

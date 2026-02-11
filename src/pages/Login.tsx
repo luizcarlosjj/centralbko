@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { LogIn } from 'lucide-react';
+import { LogIn, Headphones } from 'lucide-react';
 
 const Login = () => {
   const { signIn } = useAuth();
@@ -29,9 +29,12 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[hsl(268,52%,14%)] via-[hsl(267,54%,23%)] to-[hsl(270,67%,45%)] p-4">
+      <Card className="w-full max-w-sm border-0 shadow-2xl">
+        <CardHeader className="text-center space-y-3">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+            <Headphones className="h-7 w-7 text-primary" />
+          </div>
           <CardTitle className="text-2xl">Acesso ao Painel</CardTitle>
           <CardDescription>Entre com suas credenciais</CardDescription>
         </CardHeader>
@@ -46,7 +49,7 @@ const Login = () => {
               <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full transition-all duration-200 hover:shadow-lg" disabled={loading}>
               <LogIn className="mr-2 h-4 w-4" />
               {loading ? 'Entrando...' : 'Entrar'}
             </Button>

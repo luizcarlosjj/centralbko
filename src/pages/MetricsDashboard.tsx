@@ -6,7 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Ticket, PRIORITY_LABELS, TYPE_LABELS, Profile } from '@/types/tickets';
 import { ClipboardList, Clock, CheckCircle, PlayCircle } from 'lucide-react';
 
-const COLORS = ['hsl(221, 83%, 53%)', 'hsl(142, 71%, 45%)', 'hsl(38, 92%, 50%)', 'hsl(0, 84%, 60%)', 'hsl(199, 89%, 48%)'];
+const COLORS = ['hsl(270, 67%, 45%)', 'hsl(258, 68%, 74%)', 'hsl(142, 71%, 45%)', 'hsl(38, 92%, 50%)', 'hsl(0, 84%, 60%)'];
 
 const MetricsDashboard = () => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -142,7 +142,7 @@ const MetricsDashboard = () => {
                   <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                   <YAxis allowDecimals={false} />
                   <Tooltip />
-                  <Bar dataKey="value" fill="hsl(221, 83%, 53%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="value" fill="hsl(270, 67%, 45%)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -159,8 +159,8 @@ const MetricsDashboard = () => {
                   <YAxis allowDecimals={false} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="total" fill="hsl(221, 83%, 53%)" name="Total" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="finalizados" fill="hsl(142, 71%, 45%)" name="Finalizados" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="total" fill="hsl(270, 67%, 45%)" name="Total" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="finalizados" fill="hsl(258, 68%, 74%)" name="Finalizados" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -176,7 +176,7 @@ const MetricsDashboard = () => {
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                   <YAxis allowDecimals={false} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="chamados" stroke="hsl(221, 83%, 53%)" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="chamados" stroke="hsl(270, 67%, 45%)" strokeWidth={2} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             </CardContent>
