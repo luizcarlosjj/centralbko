@@ -10,6 +10,7 @@ import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import MetricsDashboard from "@/pages/MetricsDashboard";
 import UserManagement from "@/pages/UserManagement";
+import PauseReasons from "@/pages/PauseReasons";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import NotFound from "@/pages/NotFound";
 
@@ -39,6 +40,11 @@ const App = () => (
               <Route path="/users" element={
                 <ProtectedRoute allowedRoles={['supervisor']}>
                   <UserManagement />
+                </ProtectedRoute>
+              } />
+              <Route path="/pause-reasons" element={
+                <ProtectedRoute allowedRoles={['supervisor']}>
+                  <PauseReasons />
                 </ProtectedRoute>
               } />
               <Route path="*" element={<NotFound />} />

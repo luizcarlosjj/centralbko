@@ -21,7 +21,6 @@ const priorityColor: Record<string, string> = {
 };
 
 const statusColor: Record<string, string> = {
-  nao_iniciado: 'bg-muted text-muted-foreground',
   em_andamento: 'bg-primary/10 text-primary border-primary/20',
   pausado: 'bg-warning/10 text-warning border-warning/20',
   finalizado: 'bg-success/10 text-success border-success/20',
@@ -56,14 +55,15 @@ const SupervisorPanel = () => {
   const reopenTicket = async (ticket: Ticket) => {
     if (!user) return;
     await supabase.from('tickets').update({
-      status: 'nao_iniciado',
+      status: 'em_andamento',
       finished_at: null,
-    }).eq('id', ticket.id);
+      started_at: new Date().toISOString(),
+    } as any).eq('id', ticket.id);
     await supabase.from('ticket_status_logs').insert({
       ticket_id: ticket.id,
       changed_by: user.id,
       old_status: 'finalizado',
-      new_status: 'nao_iniciado',
+      new_status: 'em_andamento',
     });
     fetchData();
   };

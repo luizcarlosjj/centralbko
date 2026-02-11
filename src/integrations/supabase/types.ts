@@ -14,6 +14,141 @@ export type Database = {
   }
   public: {
     Tables: {
+      assignment_control: {
+        Row: {
+          id: string
+          last_assigned_user_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          last_assigned_user_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          last_assigned_user_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      pause_evidences: {
+        Row: {
+          created_at: string
+          file_url: string
+          id: string
+          pause_log_id: string
+          ticket_id: string
+          uploaded_by: string
+        }
+        Insert: {
+          created_at?: string
+          file_url: string
+          id?: string
+          pause_log_id: string
+          ticket_id: string
+          uploaded_by: string
+        }
+        Update: {
+          created_at?: string
+          file_url?: string
+          id?: string
+          pause_log_id?: string
+          ticket_id?: string
+          uploaded_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pause_evidences_pause_log_id_fkey"
+            columns: ["pause_log_id"]
+            isOneToOne: false
+            referencedRelation: "pause_logs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pause_evidences_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pause_logs: {
+        Row: {
+          created_by: string
+          description_text: string | null
+          id: string
+          pause_ended_at: string | null
+          pause_reason_id: string
+          pause_started_at: string
+          paused_seconds: number
+          ticket_id: string
+        }
+        Insert: {
+          created_by: string
+          description_text?: string | null
+          id?: string
+          pause_ended_at?: string | null
+          pause_reason_id: string
+          pause_started_at?: string
+          paused_seconds?: number
+          ticket_id: string
+        }
+        Update: {
+          created_by?: string
+          description_text?: string | null
+          id?: string
+          pause_ended_at?: string | null
+          pause_reason_id?: string
+          pause_started_at?: string
+          paused_seconds?: number
+          ticket_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pause_logs_pause_reason_id_fkey"
+            columns: ["pause_reason_id"]
+            isOneToOne: false
+            referencedRelation: "pause_reasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pause_logs_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pause_reasons: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string
+          description: string | null
+          id: string
+          title: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by: string
+          description?: string | null
+          id?: string
+          title: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string
+          description?: string | null
+          id?: string
+          title?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -75,6 +210,7 @@ export type Database = {
           description: string
           finished_at: string | null
           id: string
+          pause_started_at: string | null
           priority: string
           requester_name: string
           started_at: string | null
@@ -90,6 +226,7 @@ export type Database = {
           description: string
           finished_at?: string | null
           id?: string
+          pause_started_at?: string | null
           priority: string
           requester_name: string
           started_at?: string | null
@@ -105,6 +242,7 @@ export type Database = {
           description?: string
           finished_at?: string | null
           id?: string
+          pause_started_at?: string | null
           priority?: string
           requester_name?: string
           started_at?: string | null

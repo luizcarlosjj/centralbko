@@ -33,9 +33,6 @@ const PublicTicketForm = () => {
       priority,
       type,
       description,
-      status: 'nao_iniciado',
-      total_execution_seconds: 0,
-      total_paused_seconds: 0,
     } as any);
 
     setSubmitting(false);
