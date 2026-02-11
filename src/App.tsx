@@ -8,6 +8,7 @@ import PublicTicketForm from "@/pages/PublicTicketForm";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import MetricsDashboard from "@/pages/MetricsDashboard";
+import UserManagement from "@/pages/UserManagement";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import NotFound from "@/pages/NotFound";
 
@@ -31,6 +32,11 @@ const App = () => (
             <Route path="/metrics" element={
               <ProtectedRoute allowedRoles={['supervisor']}>
                 <MetricsDashboard />
+              </ProtectedRoute>
+            } />
+            <Route path="/users" element={
+              <ProtectedRoute allowedRoles={['supervisor']}>
+                <UserManagement />
               </ProtectedRoute>
             } />
             <Route path="*" element={<NotFound />} />
