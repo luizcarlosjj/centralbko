@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,7 +46,7 @@ const SupervisorPanel = () => {
       supabase.from('tickets').select('*').order('created_at', { ascending: false }),
       supabase.from('profiles').select('*'),
     ]);
-    if (ticketsRes.data) setTickets(ticketsRes.data);
+    if (ticketsRes.data) setTickets(ticketsRes.data as unknown as Ticket[]);
     if (analystsRes.data) setAnalysts(analystsRes.data);
     setLoading(false);
   }, []);

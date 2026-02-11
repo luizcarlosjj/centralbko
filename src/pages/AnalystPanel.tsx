@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -38,8 +38,8 @@ const AnalystPanel = () => {
       supabase.from('tickets').select('*').is('assigned_analyst_id', null).eq('status', 'nao_iniciado').order('created_at', { ascending: false }),
     ]);
 
-    if (myRes.data) setMyTickets(myRes.data);
-    if (availRes.data) setAvailableTickets(availRes.data);
+    if (myRes.data) setMyTickets(myRes.data as unknown as Ticket[]);
+    if (availRes.data) setAvailableTickets(availRes.data as unknown as Ticket[]);
     setLoading(false);
   }, [user]);
 

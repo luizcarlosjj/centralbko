@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
@@ -19,7 +19,7 @@ const MetricsDashboard = () => {
         supabase.from('tickets').select('*').order('created_at', { ascending: false }),
         supabase.from('profiles').select('*'),
       ]);
-      if (ticketsRes.data) setTickets(ticketsRes.data);
+      if (ticketsRes.data) setTickets(ticketsRes.data as unknown as Ticket[]);
       if (analystsRes.data) setAnalysts(analystsRes.data);
       setLoading(false);
     };
