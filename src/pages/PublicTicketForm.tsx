@@ -24,7 +24,10 @@ const PublicTicketForm = () => {
     if (!priority || !type) return;
     setSubmitting(true);
 
-    const { data, error } = await supabase.from('tickets').insert({
+    const id = crypto.randomUUID();
+
+    const { error } = await supabase.from('tickets').insert({
+      id,
       base_name: baseName,
       requester_name: requesterName,
       priority,
@@ -33,11 +36,11 @@ const PublicTicketForm = () => {
       status: 'nao_iniciado',
       total_execution_seconds: 0,
       total_paused_seconds: 0,
-    }).select('id').single();
+    } as any);
 
     setSubmitting(false);
-    if (!error && data) {
-      setTicketId(data.id);
+    if (!error) {
+      setTicketId(id);
     }
   };
 
