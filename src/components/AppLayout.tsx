@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { LogOut, LayoutDashboard, BarChart3, Bell } from 'lucide-react';
+import { LogOut, LayoutDashboard, BarChart3, Users } from 'lucide-react';
 import NotificationBell from '@/components/NotificationBell';
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -30,12 +30,20 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 </Button>
               </Link>
               {role === 'supervisor' && (
-                <Link to="/metrics">
-                  <Button variant="ghost" size="sm">
-                    <BarChart3 className="mr-1 h-4 w-4" />
-                    Métricas
-                  </Button>
-                </Link>
+                <>
+                  <Link to="/metrics">
+                    <Button variant="ghost" size="sm">
+                      <BarChart3 className="mr-1 h-4 w-4" />
+                      Métricas
+                    </Button>
+                  </Link>
+                  <Link to="/users">
+                    <Button variant="ghost" size="sm">
+                      <Users className="mr-1 h-4 w-4" />
+                      Usuários
+                    </Button>
+                  </Link>
+                </>
               )}
             </nav>
           </div>
