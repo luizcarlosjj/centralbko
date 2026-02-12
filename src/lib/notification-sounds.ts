@@ -1,23 +1,43 @@
-// Simple tone generator using Web Audio API
-// Each tone is a function that plays a short melody
-
+// Singleton AudioContext + global unlock for Web Audio API
 export interface NotificationTone {
   id: string;
   name: string;
   play: () => void;
 }
 
-const audioCtx = () => new (window.AudioContext || (window as any).webkitAudioContext)();
+let ctx: AudioContext | null = null;
+
+function getAudioContext(): AudioContext {
+  if (!ctx) {
+    ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // Auto-unlock on first user gesture
+    const unlock = () => {
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    };
+    document.addEventListener('click', unlock, { once: false });
+    document.addEventListener('touchstart', unlock, { once: false });
+    // Remove listeners once unlocked
+    const cleanup = () => {
+      if (ctx && ctx.state === 'running') {
+        document.removeEventListener('click', unlock);
+        document.removeEventListener('touchstart', unlock);
+      }
+    };
+    ctx.addEventListener('statechange', cleanup);
+  }
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
 
 function playTone(frequencies: number[], durations: number[], type: OscillatorType = 'sine') {
-  const ctx = audioCtx();
-  const gain = ctx.createGain();
-  gain.connect(ctx.destination);
+  const audioCtx = getAudioContext();
+  const gain = audioCtx.createGain();
+  gain.connect(audioCtx.destination);
   gain.gain.value = 0.3;
 
-  let time = ctx.currentTime;
+  let time = audioCtx.currentTime;
   frequencies.forEach((freq, i) => {
-    const osc = ctx.createOscillator();
+    const osc = audioCtx.createOscillator();
     osc.type = type;
     osc.frequency.value = freq;
     osc.connect(gain);
@@ -25,9 +45,6 @@ function playTone(frequencies: number[], durations: number[], type: OscillatorTy
     osc.stop(time + durations[i]);
     time += durations[i] + 0.05;
   });
-
-  // Cleanup
-  setTimeout(() => ctx.close(), (time - ctx.currentTime + 0.5) * 1000);
 }
 
 export const NOTIFICATION_TONES: NotificationTone[] = [
