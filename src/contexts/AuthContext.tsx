@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import type { AppRole, Profile } from '@/types/tickets';
@@ -23,40 +23,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionResolved, setSessionResolved] = useState(false);
+  const [profileResolved, setProfileResolved] = useState(false);
+  const fetchingRef = useRef(false);
 
-  const fetchProfileAndRole = async (userId: string) => {
-    const [profileRes, roleRes] = await Promise.all([
-      supabase.from('profiles').select('*').eq('id', userId).single(),
-      supabase.from('user_roles').select('role').eq('user_id', userId).single(),
-    ]);
-    if (profileRes.data) setProfile(profileRes.data);
-    if (roleRes.data) setRole(roleRes.data.role as AppRole);
-  };
-
+  // Step 1: Listen for auth state changes — only set session/user, no async work
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchProfileAndRole(session.user.id);
-      } else {
+      setSessionResolved(true);
+      if (!session?.user) {
         setProfile(null);
         setRole(null);
+        setProfileResolved(true);
+      } else {
+        setProfileResolved(false); // will be resolved by the user effect
       }
-      setLoading(false);
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfileAndRole(session.user.id);
+      setSessionResolved(true);
+      if (!session?.user) {
+        setProfile(null);
+        setRole(null);
+        setProfileResolved(true);
       }
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Step 2: When user changes, fetch profile and role separately
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      setRole(null);
+      setProfileResolved(true);
+      return;
+    }
+
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+
+    Promise.all([
+      supabase.from('profiles').select('*').eq('id', user.id).single(),
+      supabase.from('user_roles').select('role').eq('user_id', user.id).single(),
+    ]).then(([profileRes, roleRes]) => {
+      if (profileRes.data) setProfile(profileRes.data);
+      if (roleRes.data) setRole(roleRes.data.role as AppRole);
+      setProfileResolved(true);
+      fetchingRef.current = false;
+    }).catch(() => {
+      setProfileResolved(true);
+      fetchingRef.current = false;
+    });
+  }, [user?.id]);
+
+  // Step 3: Loading is only false when both session and profile are resolved
+  useEffect(() => {
+    if (sessionResolved && profileResolved) {
+      setLoading(false);
+    }
+  }, [sessionResolved, profileResolved]);
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
