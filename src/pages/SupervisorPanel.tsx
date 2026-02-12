@@ -10,9 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, Profile } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
+import PauseDetailsDialog from '@/components/PauseDetailsDialog';
 import { Link } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
 
@@ -44,6 +45,7 @@ const SupervisorPanel = () => {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [page, setPage] = useState(0);
+  const [pauseDetailTicket, setPauseDetailTicket] = useState<Ticket | null>(null);
 
   const { data: analysts = [] } = useQuery({
     queryKey: ['supervisor-analysts'],
@@ -253,7 +255,12 @@ const SupervisorPanel = () => {
                     <TableCell className="text-sm">{getAnalystName(ticket.assigned_analyst_id)}</TableCell>
                     <TableCell><LiveTimer ticket={ticket} /></TableCell>
                     <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
-                    <TableCell>
+                    <TableCell className="space-x-1">
+                      {ticket.status === 'pausado' && (
+                        <Button size="sm" variant="outline" onClick={() => setPauseDetailTicket(ticket)}>
+                          <Eye className="mr-1 h-3 w-3" /> Pausa
+                        </Button>
+                      )}
                       {ticket.status === 'finalizado' && (
                         <Button size="sm" variant="outline" onClick={() => reopenTicket(ticket)}>
                           <RotateCcw className="mr-1 h-3 w-3" /> Reabrir
@@ -279,6 +286,14 @@ const SupervisorPanel = () => {
           </CardContent>
         </Card>
       </div>
+
+      {pauseDetailTicket && (
+        <PauseDetailsDialog
+          open={!!pauseDetailTicket}
+          onOpenChange={(open) => { if (!open) setPauseDetailTicket(null); }}
+          ticket={pauseDetailTicket}
+        />
+      )}
     </AppLayout>
   );
 };
