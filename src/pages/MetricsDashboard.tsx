@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
@@ -11,6 +11,19 @@ const COLORS = ['hsl(270, 67%, 45%)', 'hsl(258, 68%, 74%)', 'hsl(142, 71%, 45%)'
 const TICKET_COLUMNS = 'id, status, priority, type, assigned_analyst_id, total_execution_seconds, created_at';
 
 const MetricsDashboard = () => {
+  const queryClient = useQueryClient();
+
+  // Realtime subscription for live metric updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('metrics-tickets-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['metrics-tickets'] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
+
   const { data: tickets = [], isLoading: ticketsLoading } = useQuery({
     queryKey: ['metrics-tickets'],
     queryFn: async () => {
@@ -41,7 +54,8 @@ const MetricsDashboard = () => {
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
   const byPriority = Object.entries(PRIORITY_LABELS).map(([key, label]) => ({

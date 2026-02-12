@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Pause, Play, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, TicketStatus, PauseLog } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
+import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
 
 const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id';
@@ -96,10 +97,21 @@ const AnalystPanel = () => {
   const finishedTotal = finishedData?.count || 0;
   const loading = openLoading || finishedLoading;
 
-  const invalidateTickets = () => {
+  const invalidateTickets = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['analyst-open-tickets'] });
     queryClient.invalidateQueries({ queryKey: ['analyst-finished-tickets'] });
-  };
+  }, [queryClient]);
+
+  // Realtime subscription for live updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('analyst-tickets-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, () => {
+        invalidateTickets();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [invalidateTickets]);
 
   const toggleExpand = async (ticketId: string) => {
     const next = new Set(expandedRows);
@@ -290,7 +302,7 @@ const AnalystPanel = () => {
                           <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
                           <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
                           <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
-                          <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
+                          <TableCell><LiveTimer ticket={ticket} /></TableCell>
                           <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
                           <TableCell>
                             {ticket.status === 'em_andamento' && (

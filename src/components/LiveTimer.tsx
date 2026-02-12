@@ -1,0 +1,44 @@
+import React, { useState, useEffect } from 'react';
+import type { Ticket } from '@/types/tickets';
+
+const formatTime = (totalSeconds: number) => {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+};
+
+interface LiveTimerProps {
+  ticket: Ticket;
+}
+
+const LiveTimer: React.FC<LiveTimerProps> = ({ ticket }) => {
+  const [display, setDisplay] = useState(() => computeTime(ticket));
+
+  useEffect(() => {
+    if (ticket.status !== 'em_andamento' || !ticket.started_at) {
+      setDisplay(computeTime(ticket));
+      return;
+    }
+
+    setDisplay(computeTime(ticket));
+    const interval = setInterval(() => {
+      setDisplay(computeTime(ticket));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [ticket.status, ticket.started_at, ticket.total_execution_seconds]);
+
+  return <span className="font-mono text-xs">{formatTime(display)}</span>;
+};
+
+function computeTime(ticket: Ticket): number {
+  const base = ticket.total_execution_seconds || 0;
+  if (ticket.status === 'em_andamento' && ticket.started_at) {
+    const elapsed = Math.floor((Date.now() - new Date(ticket.started_at).getTime()) / 1000);
+    return base + Math.max(0, elapsed);
+  }
+  return base;
+}
+
+export default LiveTimer;

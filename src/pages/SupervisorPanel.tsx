@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -12,10 +12,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, Profile } from '@/types/tickets';
+import LiveTimer from '@/components/LiveTimer';
 import { Link } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
 
-const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, assigned_analyst_id, total_execution_seconds, created_at, finished_at';
+const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, assigned_analyst_id, total_execution_seconds, started_at, created_at, finished_at';
 const PAGE_SIZE = 20;
 
 const priorityColor: Record<string, string> = {
@@ -95,6 +96,17 @@ const SupervisorPanel = () => {
     queryClient.invalidateQueries({ queryKey: ['supervisor-tickets'] });
   };
 
+  // Realtime subscription for live updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('supervisor-tickets-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['supervisor-tickets'] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
+
   // Summary stats from current page (approximate for filtered view)
   const inProgress = tickets.filter(t => t.status === 'em_andamento').length;
   const finished = tickets.filter(t => t.status === 'finalizado').length;
@@ -106,7 +118,8 @@ const SupervisorPanel = () => {
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
   const getAnalystName = (id: string | null) => {
@@ -238,7 +251,7 @@ const SupervisorPanel = () => {
                     <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
                     <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
                     <TableCell className="text-sm">{getAnalystName(ticket.assigned_analyst_id)}</TableCell>
-                    <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
+                    <TableCell><LiveTimer ticket={ticket} /></TableCell>
                     <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
                     <TableCell>
                       {ticket.status === 'finalizado' && (
