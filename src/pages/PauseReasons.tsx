@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,26 +11,41 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Plus, Pencil } from 'lucide-react';
+import { Plus, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
 import { PauseReason } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
 
+const PAGE_SIZE = 20;
+
 const PauseReasons = () => {
   const { user } = useAuth();
-  const [reasons, setReasons] = useState<PauseReason[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [page, setPage] = useState(0);
 
-  const fetchReasons = useCallback(async () => {
-    const { data } = await supabase.from('pause_reasons').select('*').order('created_at', { ascending: false });
-    if (data) setReasons(data as unknown as PauseReason[]);
-    setLoading(false);
-  }, []);
+  const { data: reasonsData, isLoading: loading } = useQuery({
+    queryKey: ['pause-reasons', page],
+    queryFn: async () => {
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data, count } = await supabase
+        .from('pause_reasons')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, to);
+      return { reasons: (data || []) as unknown as PauseReason[], count: count || 0 };
+    },
+    staleTime: 60_000,
+  });
 
-  useEffect(() => { fetchReasons(); }, [fetchReasons]);
+  const reasons = reasonsData?.reasons || [];
+  const totalCount = reasonsData?.count || 0;
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['pause-reasons'] });
 
   const openNew = () => {
     setEditingId(null);
@@ -55,12 +71,12 @@ const PauseReasons = () => {
       toast({ title: 'Motivo criado' });
     }
     setDialogOpen(false);
-    fetchReasons();
+    invalidate();
   };
 
   const toggleActive = async (r: PauseReason) => {
     await supabase.from('pause_reasons').update({ active: !r.active } as any).eq('id', r.id);
-    fetchReasons();
+    invalidate();
   };
 
   return (
@@ -101,6 +117,17 @@ const PauseReasons = () => {
             </Table>
             {reasons.length === 0 && !loading && (
               <p className="text-center text-sm text-muted-foreground py-8">Nenhum motivo cadastrado</p>
+            )}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 pt-4">
+                <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm text-muted-foreground">{page + 1} / {totalPages}</span>
+                <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(page + 1)}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>

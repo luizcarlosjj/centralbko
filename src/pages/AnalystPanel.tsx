@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,10 +11,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Pause, Play, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Pause, Play, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, TicketStatus, PauseLog } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import { toast } from '@/hooks/use-toast';
+
+const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id';
+const PAGE_SIZE = 20;
 
 const priorityColor: Record<string, string> = {
   baixa: 'bg-info/10 text-info border-info/20',
@@ -30,9 +34,7 @@ const statusColor: Record<string, string> = {
 
 const AnalystPanel = () => {
   const { user } = useAuth();
-  const [openTickets, setOpenTickets] = useState<Ticket[]>([]);
-  const [finishedTickets, setFinishedTickets] = useState<Ticket[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [pauseDialogTicket, setPauseDialogTicket] = useState<Ticket | null>(null);
 
   // Filters
@@ -42,24 +44,62 @@ const AnalystPanel = () => {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
 
-  // Expanded rows for finished tickets (pause history)
+  // Pagination
+  const [openPage, setOpenPage] = useState(0);
+  const [finishedPage, setFinishedPage] = useState(0);
+
+  // Expanded rows for finished tickets
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [pauseLogs, setPauseLogs] = useState<Record<string, PauseLog[]>>({});
 
-  const fetchTickets = useCallback(async () => {
-    if (!user) return;
+  const { data: openData, isLoading: openLoading } = useQuery({
+    queryKey: ['analyst-open-tickets', user?.id, openPage],
+    queryFn: async () => {
+      if (!user) return { tickets: [] as Ticket[], count: 0 };
+      const from = openPage * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data, count } = await supabase
+        .from('tickets')
+        .select(TICKET_COLUMNS, { count: 'exact' })
+        .eq('assigned_analyst_id', user.id)
+        .in('status', ['em_andamento', 'pausado'])
+        .order('created_at', { ascending: false })
+        .range(from, to);
+      return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
+    },
+    enabled: !!user,
+    staleTime: 30_000,
+  });
 
-    const [openRes, finishedRes] = await Promise.all([
-      supabase.from('tickets').select('*').eq('assigned_analyst_id', user.id).in('status', ['em_andamento', 'pausado']).order('created_at', { ascending: false }),
-      supabase.from('tickets').select('*').eq('assigned_analyst_id', user.id).eq('status', 'finalizado').order('finished_at', { ascending: false }),
-    ]);
+  const { data: finishedData, isLoading: finishedLoading } = useQuery({
+    queryKey: ['analyst-finished-tickets', user?.id, finishedPage],
+    queryFn: async () => {
+      if (!user) return { tickets: [] as Ticket[], count: 0 };
+      const from = finishedPage * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data, count } = await supabase
+        .from('tickets')
+        .select(TICKET_COLUMNS, { count: 'exact' })
+        .eq('assigned_analyst_id', user.id)
+        .eq('status', 'finalizado')
+        .order('finished_at', { ascending: false })
+        .range(from, to);
+      return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
+    },
+    enabled: !!user,
+    staleTime: 60_000,
+  });
 
-    if (openRes.data) setOpenTickets(openRes.data as unknown as Ticket[]);
-    if (finishedRes.data) setFinishedTickets(finishedRes.data as unknown as Ticket[]);
-    setLoading(false);
-  }, [user]);
+  const openTickets = openData?.tickets || [];
+  const openTotal = openData?.count || 0;
+  const finishedTickets = finishedData?.tickets || [];
+  const finishedTotal = finishedData?.count || 0;
+  const loading = openLoading || finishedLoading;
 
-  useEffect(() => { fetchTickets(); }, [fetchTickets]);
+  const invalidateTickets = () => {
+    queryClient.invalidateQueries({ queryKey: ['analyst-open-tickets'] });
+    queryClient.invalidateQueries({ queryKey: ['analyst-finished-tickets'] });
+  };
 
   const toggleExpand = async (ticketId: string) => {
     const next = new Set(expandedRows);
@@ -68,7 +108,7 @@ const AnalystPanel = () => {
     } else {
       next.add(ticketId);
       if (!pauseLogs[ticketId]) {
-        const { data } = await supabase.from('pause_logs').select('*').eq('ticket_id', ticketId).order('pause_started_at', { ascending: false });
+        const { data } = await supabase.from('pause_logs').select('id, ticket_id, pause_reason_id, description_text, pause_started_at, pause_ended_at, paused_seconds, created_by').eq('ticket_id', ticketId).order('pause_started_at', { ascending: false });
         if (data) setPauseLogs(prev => ({ ...prev, [ticketId]: data as unknown as PauseLog[] }));
       }
     }
@@ -78,16 +118,11 @@ const AnalystPanel = () => {
   const resumeTicket = async (ticket: Ticket) => {
     if (!user) return;
     const now = new Date();
-
-    // Close active pause_log
-    const { data: activePause } = await supabase.from('pause_logs').select('*').eq('ticket_id', ticket.id).is('pause_ended_at', null).single();
+    const { data: activePause } = await supabase.from('pause_logs').select('id, pause_started_at').eq('ticket_id', ticket.id).is('pause_ended_at', null).single();
     
     if (activePause) {
       const pausedSecs = Math.floor((now.getTime() - new Date((activePause as any).pause_started_at).getTime()) / 1000);
-      await supabase.from('pause_logs').update({
-        pause_ended_at: now.toISOString(),
-        paused_seconds: pausedSecs,
-      } as any).eq('id', (activePause as any).id);
+      await supabase.from('pause_logs').update({ pause_ended_at: now.toISOString(), paused_seconds: pausedSecs } as any).eq('id', (activePause as any).id);
     }
 
     const pausedSecsToAdd = ticket.pause_started_at
@@ -95,21 +130,13 @@ const AnalystPanel = () => {
       : 0;
 
     await supabase.from('tickets').update({
-      status: 'em_andamento',
-      started_at: now.toISOString(),
-      pause_started_at: null,
+      status: 'em_andamento', started_at: now.toISOString(), pause_started_at: null,
       total_paused_seconds: (ticket.total_paused_seconds || 0) + pausedSecsToAdd,
     } as any).eq('id', ticket.id);
 
-    await supabase.from('ticket_status_logs').insert({
-      ticket_id: ticket.id,
-      changed_by: user.id,
-      old_status: 'pausado',
-      new_status: 'em_andamento',
-    });
-
+    await supabase.from('ticket_status_logs').insert({ ticket_id: ticket.id, changed_by: user.id, old_status: 'pausado', new_status: 'em_andamento' });
     toast({ title: 'Chamado retomado' });
-    fetchTickets();
+    invalidateTickets();
   };
 
   const finalizeTicket = async (ticket: Ticket) => {
@@ -118,20 +145,15 @@ const AnalystPanel = () => {
     let execSeconds = ticket.total_execution_seconds || 0;
     let pausedSeconds = ticket.total_paused_seconds || 0;
 
-    // If currently running, accumulate execution time
     if (ticket.status === 'em_andamento' && ticket.started_at) {
       execSeconds += Math.floor((now.getTime() - new Date(ticket.started_at).getTime()) / 1000);
     }
 
-    // If currently paused, close the pause first
     if (ticket.status === 'pausado') {
-      const { data: activePause } = await supabase.from('pause_logs').select('*').eq('ticket_id', ticket.id).is('pause_ended_at', null).single();
+      const { data: activePause } = await supabase.from('pause_logs').select('id, pause_started_at').eq('ticket_id', ticket.id).is('pause_ended_at', null).single();
       if (activePause) {
         const pausedSecs = Math.floor((now.getTime() - new Date((activePause as any).pause_started_at).getTime()) / 1000);
-        await supabase.from('pause_logs').update({
-          pause_ended_at: now.toISOString(),
-          paused_seconds: pausedSecs,
-        } as any).eq('id', (activePause as any).id);
+        await supabase.from('pause_logs').update({ pause_ended_at: now.toISOString(), paused_seconds: pausedSecs } as any).eq('id', (activePause as any).id);
       }
       if (ticket.pause_started_at) {
         pausedSeconds += Math.floor((now.getTime() - new Date(ticket.pause_started_at).getTime()) / 1000);
@@ -139,22 +161,13 @@ const AnalystPanel = () => {
     }
 
     await supabase.from('tickets').update({
-      status: 'finalizado',
-      finished_at: now.toISOString(),
-      pause_started_at: null,
-      total_execution_seconds: execSeconds,
-      total_paused_seconds: pausedSeconds,
+      status: 'finalizado', finished_at: now.toISOString(), pause_started_at: null,
+      total_execution_seconds: execSeconds, total_paused_seconds: pausedSeconds,
     } as any).eq('id', ticket.id);
 
-    await supabase.from('ticket_status_logs').insert({
-      ticket_id: ticket.id,
-      changed_by: user.id,
-      old_status: ticket.status,
-      new_status: 'finalizado',
-    });
-
+    await supabase.from('ticket_status_logs').insert({ ticket_id: ticket.id, changed_by: user.id, old_status: ticket.status, new_status: 'finalizado' });
     toast({ title: 'Chamado finalizado' });
-    fetchTickets();
+    invalidateTickets();
   };
 
   const formatTime = (seconds: number) => {
@@ -173,9 +186,23 @@ const AnalystPanel = () => {
     return true;
   });
 
-  const openStatusOptions: Record<string, string> = {
-    em_andamento: 'Em Andamento',
-    pausado: 'Pausado',
+  const openStatusOptions: Record<string, string> = { em_andamento: 'Em Andamento', pausado: 'Pausado' };
+  const openTotalPages = Math.ceil(openTotal / PAGE_SIZE);
+  const finishedTotalPages = Math.ceil(finishedTotal / PAGE_SIZE);
+
+  const PaginationControls = ({ page, totalPages, setPage }: { page: number; totalPages: number; setPage: (p: number) => void }) => {
+    if (totalPages <= 1) return null;
+    return (
+      <div className="flex items-center justify-center gap-2 pt-4">
+        <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="text-sm text-muted-foreground">{page + 1} / {totalPages}</span>
+        <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(page + 1)}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    );
   };
 
   return (
@@ -185,12 +212,11 @@ const AnalystPanel = () => {
 
         <Tabs defaultValue="open" className="w-full">
           <TabsList>
-            <TabsTrigger value="open">Em Aberto ({openTickets.length})</TabsTrigger>
-            <TabsTrigger value="finished">Finalizados ({finishedTickets.length})</TabsTrigger>
+            <TabsTrigger value="open">Em Aberto ({openTotal})</TabsTrigger>
+            <TabsTrigger value="finished">Finalizados ({finishedTotal})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="open">
-            {/* Filters */}
             <Card className="mb-4">
               <CardContent className="pt-4">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -261,13 +287,9 @@ const AnalystPanel = () => {
                           <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
                           <TableCell>{ticket.base_name}</TableCell>
                           <TableCell>{ticket.requester_name}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge>
-                          </TableCell>
+                          <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
                           <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge>
-                          </TableCell>
+                          <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
                           <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
                           <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
                           <TableCell>
@@ -297,6 +319,7 @@ const AnalystPanel = () => {
                     </TableBody>
                   </Table>
                 )}
+                <PaginationControls page={openPage} totalPages={openTotalPages} setPage={setOpenPage} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -331,9 +354,7 @@ const AnalystPanel = () => {
                             <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
                             <TableCell>{ticket.base_name}</TableCell>
                             <TableCell>{ticket.requester_name}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge>
-                            </TableCell>
+                            <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
                             <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_paused_seconds || 0)}</TableCell>
@@ -368,6 +389,7 @@ const AnalystPanel = () => {
                     </TableBody>
                   </Table>
                 )}
+                <PaginationControls page={finishedPage} totalPages={finishedTotalPages} setPage={setFinishedPage} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -379,7 +401,7 @@ const AnalystPanel = () => {
           open={!!pauseDialogTicket}
           onOpenChange={(open) => { if (!open) setPauseDialogTicket(null); }}
           ticket={pauseDialogTicket}
-          onPaused={fetchTickets}
+          onPaused={invalidateTickets}
         />
       )}
     </AppLayout>
