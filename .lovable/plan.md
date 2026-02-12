@@ -1,151 +1,83 @@
 
 
-# Otimizacao de Performance e Reducao de Consumo
+# Correcao de Bugs e Melhorias de Tempo Real
 
-## Visao Geral
+## Diagnostico dos 4 Problemas
 
-Otimizacao tecnica completa sem alterar regras de negocio. Foco em: paginacao de listagens, indices no banco, cache com React Query, compressao de imagens antes do upload, e lazy loading de componentes pesados.
+### Problema 1: Carregamento infinito apos F5
+**Causa raiz:** O `AuthContext.tsx` tem uma condicao de corrida. O `onAuthStateChange` faz `await fetchProfileAndRole()` dentro do callback, o que bloqueia o listener do Supabase. Quando a pagina recarrega e o token e revalidado, o callback trava esperando a resposta do banco, e o `loading` nunca vira `false`. Alem disso, `getSession()` e `onAuthStateChange` competem entre si, podendo setar `loading = false` antes do perfil/role serem carregados.
 
----
+**Solucao:** Reestruturar o `AuthContext`:
+- No `onAuthStateChange`: apenas setar `session` e `user` (sem await, sem fetch)
+- Usar um `useEffect` separado que observa `user` e dispara `fetchProfileAndRole`
+- Controlar `loading` de forma unificada: so desliga quando tanto a sessao quanto o perfil estiverem resolvidos
 
-## 1. Indices no Banco de Dados (SQL Migration)
+### Problema 2: Formato do tempo sem segundos
+**Causa raiz:** O `SupervisorPanel.tsx` usa `formatTime` que retorna `Xh Xm` (sem segundos). O `AnalystPanel.tsx` ja tem formato HH:MM:SS mas o tempo exibido e estatico (valor do banco).
 
-Criar indices para acelerar as queries mais frequentes:
+**Solucao:** Padronizar `formatTime` com HH:MM:SS em todos os paineis.
 
-```text
-- tickets(status)
-- tickets(assigned_analyst_id)
-- tickets(created_at DESC)
-- tickets(assigned_analyst_id, status)  -- indice composto para AnalystPanel
-- pause_logs(ticket_id)
-- pause_logs(ticket_id, pause_ended_at) -- para buscar pausa ativa
-- pause_evidences(pause_log_id)
-```
+### Problema 3: Timer estatico (nao conta em tempo real)
+**Causa raiz:** A coluna "Tempo" mostra `total_execution_seconds` do banco, que so e atualizado ao pausar/finalizar. Nao ha nenhum `setInterval` no frontend para calcular o tempo decorrido em tempo real.
 
----
+**Solucao:** Criar um componente `LiveTimer` que:
+- Recebe o ticket como prop
+- Se status = `em_andamento` e tem `started_at`: calcula `total_execution_seconds + (now - started_at)` e atualiza a cada segundo via `setInterval`
+- Se status = `pausado`: mostra o valor estatico do banco (tempo congelado)
+- Se status = `finalizado`: mostra o valor final do banco
 
-## 2. Paginacao em Todas as Listagens
+### Problema 4: Chamados nao aparecem em tempo real
+**Causa raiz:** A `NotificationBell` escuta INSERT de tickets via Realtime, mas os paineis (AnalystPanel, SupervisorPanel) usam React Query com `staleTime` de 30s. Nao ha subscription Realtime para invalidar o cache quando um ticket novo chega ou muda de status.
 
-### 2.1 AnalystPanel.tsx
-- Adicionar paginacao com limite de 20 registros por pagina nas abas "Em Aberto" e "Finalizados"
-- Usar `.range(from, to)` do Supabase em vez de carregar tudo
-- Buscar contagem total com `{ count: 'exact', head: true }` para exibir total de paginas
-- Componente de paginacao na parte inferior de cada aba usando `src/components/ui/pagination.tsx`
-
-### 2.2 SupervisorPanel.tsx
-- Mesmo padrao: paginacao de 20 registros
-- Mover filtragem para o lado do banco (WHERE clauses via Supabase query builder) em vez de filtrar client-side
-- Buscar apenas colunas necessarias: `select('id, base_name, requester_name, priority, type, status, assigned_analyst_id, total_execution_seconds, created_at, finished_at')` em vez de `select('*')`
-
-### 2.3 MetricsDashboard.tsx
-- Manter carregamento completo para agregacoes (necessario para calculos de metricas)
-- Adicionar `staleTime` via React Query para cachear por 120 segundos
-- Selecionar apenas colunas necessarias para metricas: `select('id, status, priority, type, assigned_analyst_id, total_execution_seconds, created_at')`
-
-### 2.4 PauseReasons.tsx
-- Adicionar paginacao de 20 registros (menor impacto, mas consistente)
+**Solucao:** Adicionar subscription Supabase Realtime nos paineis que invalida as queries do React Query ao detectar INSERT ou UPDATE na tabela `tickets`.
 
 ---
 
-## 3. React Query para Cache e Gerenciamento de Estado
+## Alteracoes por Arquivo
 
-### Substituir useState + useEffect por useQuery em todas as paginas:
+### 1. `src/contexts/AuthContext.tsx`
+- Remover `await fetchProfileAndRole()` de dentro do `onAuthStateChange`
+- Adicionar `useEffect` separado: quando `user` muda, buscar profile e role
+- Unificar controle de `loading`: iniciar como `true`, desligar somente quando sessao e perfil estiverem resolvidos
+- Tratar caso de `user = null` (logout / sem sessao) desligando loading imediatamente
 
-**AnalystPanel.tsx:**
-- `useQuery` para tickets abertos com `staleTime: 30_000` (30s)
-- `useQuery` para tickets finalizados com `staleTime: 60_000` (60s)
-- `useMutation` para acoes (pausar, retomar, finalizar) com `invalidateQueries` automatico
+### 2. `src/components/LiveTimer.tsx` (novo)
+- Componente que recebe um `Ticket`
+- Usa `useState` + `useEffect` com `setInterval(1000)`
+- Calcula tempo real: `base + elapsed` onde `base = total_execution_seconds` e `elapsed = now - started_at` (apenas se em_andamento)
+- Formata em HH:MM:SS
+- Limpa intervalo no unmount
 
-**SupervisorPanel.tsx:**
-- `useQuery` para tickets e analistas com `staleTime: 30_000`
-- `useMutation` para reabrir ticket
+### 3. `src/pages/AnalystPanel.tsx`
+- Substituir a celula de tempo estatica pelo componente `LiveTimer`
+- Adicionar `useEffect` com Supabase Realtime subscription na tabela `tickets` (INSERT e UPDATE) que chama `invalidateQueries` para atualizar a lista automaticamente
+- Limpar subscription no unmount
 
-**MetricsDashboard.tsx:**
-- `useQuery` com `staleTime: 120_000` (2 min) -- metricas nao precisam de refresh constante
+### 4. `src/pages/SupervisorPanel.tsx`
+- Atualizar `formatTime` para formato HH:MM:SS
+- Substituir celula de tempo pelo `LiveTimer` (para tickets em andamento)
+- Adicionar Realtime subscription igual ao AnalystPanel
 
-**PauseReasons.tsx:**
-- `useQuery` com `staleTime: 60_000`
-
-Beneficios: elimina re-fetch ao navegar entre abas, cache automatico, deduplicacao de requests.
-
----
-
-## 4. Compressao de Imagens no Upload (PauseDialog.tsx)
-
-Criar utilitario `src/lib/image-compression.ts`:
-- Redimensionar para largura maxima de 1280px
-- Qualidade JPEG/WebP: 75%
-- Usar Canvas API nativo do browser (sem dependencia externa)
-- Limite de 5MB por arquivo (rejeitar acima disso com toast de erro)
-- Converter PNG para JPEG quando nao houver transparencia
-
-Atualizar `PauseDialog.tsx`:
-- Chamar `compressImage()` antes de cada upload
-- Mostrar tamanho original vs comprimido em texto informativo
-
----
-
-## 5. Lazy Loading de Componentes Pesados
-
-### No App.tsx:
-- `React.lazy()` para paginas secundarias:
-  - `MetricsDashboard` (contem Recharts -- biblioteca pesada)
-  - `PauseReasons`
-  - `UserManagement`
-- Envolver em `<Suspense>` com fallback de skeleton/spinner
-- Manter `Dashboard`, `Login` e `PublicTicketForm` como imports normais (paginas primarias)
-
----
-
-## 6. Selecao de Colunas Especificas (Evitar SELECT *)
-
-Atualizar todas as queries para buscar apenas colunas usadas:
-
-| Pagina | Query atual | Colunas necessarias |
-|--------|------------|-------------------|
-| AnalystPanel | `select('*')` em tickets | `id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id` |
-| SupervisorPanel | `select('*')` em tickets e profiles | tickets: mesmas acima. profiles: `id, name` |
-| MetricsDashboard | `select('*')` em tickets e profiles | tickets: `id, status, priority, type, assigned_analyst_id, total_execution_seconds, created_at`. profiles: `id, name` |
-| PauseDialog | `select('*')` em pause_reasons | `id, title` |
-
----
-
-## 7. Debounce em Filtros
-
-Nos paineis com filtros de data (AnalystPanel, SupervisorPanel):
-- Adicionar debounce de 400ms nos campos de data para evitar re-fetch a cada keystroke
-- Filtros de Select (status, prioridade, tipo) podem ser imediatos pois sao selecao unica
-
----
-
-## 8. Organizacao de Upload no Storage
-
-Atualizar path de upload no `PauseDialog.tsx`:
-- De: `{ticket_id}/{timestamp}_{filename}`
-- Para: `tickets/{ticket_id}/pauses/{pause_log_id}/{timestamp}_{filename}`
-- Estrutura mais organizada para eventual limpeza
+### 5. `src/pages/MetricsDashboard.tsx`
+- Adicionar Realtime subscription para invalidar cache de metricas quando tickets mudam
 
 ---
 
 ## Sequencia de Implementacao
 
-1. **Migration SQL**: criar indices
-2. **Criar `src/lib/image-compression.ts`**: utilitario de compressao
-3. **Atualizar `PauseDialog.tsx`**: compressao + limite de tamanho
-4. **Atualizar `AnalystPanel.tsx`**: React Query + paginacao + colunas especificas
-5. **Atualizar `SupervisorPanel.tsx`**: React Query + paginacao server-side + colunas especificas
-6. **Atualizar `MetricsDashboard.tsx`**: React Query com staleTime + colunas especificas
-7. **Atualizar `PauseReasons.tsx`**: React Query + paginacao
-8. **Atualizar `App.tsx`**: lazy loading das paginas secundarias
+1. Corrigir `AuthContext.tsx` (resolve carregamento infinito)
+2. Criar `LiveTimer.tsx` (componente de timer em tempo real)
+3. Atualizar `AnalystPanel.tsx` (LiveTimer + Realtime)
+4. Atualizar `SupervisorPanel.tsx` (HH:MM:SS + LiveTimer + Realtime)
+5. Atualizar `MetricsDashboard.tsx` (Realtime)
 
 ---
 
 ## Detalhes Tecnicos
 
-- React Query ja esta instalado (`@tanstack/react-query`) e configurado no `App.tsx` com `QueryClient`
-- Paginacao usa componente existente em `src/components/ui/pagination.tsx`
-- Compressao de imagem usa Canvas API nativa -- zero dependencias externas
+- O Realtime do Supabase ja esta habilitado (NotificationBell ja usa `postgres_changes`)
+- O `invalidateQueries` do React Query forca re-fetch respeitando o cache, sem duplicar requests
+- O `LiveTimer` usa `setInterval` de 1 segundo apenas para tickets `em_andamento`, evitando processamento desnecessario
 - Nenhuma regra de negocio sera alterada
-- Nenhuma funcionalidade sera removida
-- Todas as mudancas sao retrocompativeis
+- Nenhuma migracao SQL necessaria
 
