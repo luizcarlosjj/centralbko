@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Upload, X } from 'lucide-react';
 import { Ticket, PauseReason } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
+import { compressImage, formatFileSize, CompressionResult } from '@/lib/image-compression';
 
 interface PauseDialogProps {
   open: boolean;
@@ -24,26 +25,40 @@ const PauseDialog: React.FC<PauseDialogProps> = ({ open, onOpenChange, ticket, o
   const [selectedReason, setSelectedReason] = useState('');
   const [descriptionText, setDescriptionText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [compressionInfo, setCompressionInfo] = useState<CompressionResult[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (open) {
-      supabase.from('pause_reasons').select('*').eq('active', true).order('title')
+      supabase.from('pause_reasons').select('id, title').eq('active', true).order('title')
         .then(({ data }) => { if (data) setReasons(data as unknown as PauseReason[]); });
       setSelectedReason('');
       setDescriptionText('');
       setFiles([]);
+      setCompressionInfo([]);
     }
   }, [open]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(prev => [...prev, ...Array.from(e.target.files!)]);
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const newFiles = Array.from(e.target.files);
+
+    for (const file of newFiles) {
+      try {
+        const result = await compressImage(file);
+        setFiles(prev => [...prev, result.file]);
+        setCompressionInfo(prev => [...prev, result]);
+      } catch (err: any) {
+        toast({ title: 'Erro no arquivo', description: err.message, variant: 'destructive' });
+      }
     }
+    // Reset input so same file can be re-selected
+    e.target.value = '';
   };
 
   const removeFile = (index: number) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
+    setCompressionInfo(prev => prev.filter((_, i) => i !== index));
   };
 
   const canSubmit = selectedReason && descriptionText.trim() && files.length > 0 && !submitting;
@@ -53,7 +68,6 @@ const PauseDialog: React.FC<PauseDialogProps> = ({ open, onOpenChange, ticket, o
     setSubmitting(true);
 
     try {
-      // 1. Calculate accumulated execution time
       const now = new Date();
       const lastActiveStart = ticket.started_at;
       let newExecSeconds = ticket.total_execution_seconds || 0;
@@ -62,7 +76,6 @@ const PauseDialog: React.FC<PauseDialogProps> = ({ open, onOpenChange, ticket, o
         newExecSeconds += elapsed;
       }
 
-      // 2. Create pause_log
       const { data: pauseLog, error: logError } = await supabase.from('pause_logs').insert({
         ticket_id: ticket.id,
         pause_reason_id: selectedReason,
@@ -72,9 +85,10 @@ const PauseDialog: React.FC<PauseDialogProps> = ({ open, onOpenChange, ticket, o
 
       if (logError) throw logError;
 
-      // 3. Upload files
+      const pauseLogId = (pauseLog as any).id;
+
       for (const file of files) {
-        const filePath = `${ticket.id}/${Date.now()}_${file.name}`;
+        const filePath = `tickets/${ticket.id}/pauses/${pauseLogId}/${Date.now()}_${file.name}`;
         const { error: uploadError } = await supabase.storage.from('pause-evidences').upload(filePath, file);
         if (uploadError) throw uploadError;
 
@@ -82,20 +96,18 @@ const PauseDialog: React.FC<PauseDialogProps> = ({ open, onOpenChange, ticket, o
 
         await supabase.from('pause_evidences').insert({
           ticket_id: ticket.id,
-          pause_log_id: (pauseLog as any).id,
+          pause_log_id: pauseLogId,
           file_url: urlData.publicUrl,
           uploaded_by: user.id,
         } as any);
       }
 
-      // 4. Update ticket
       await supabase.from('tickets').update({
         status: 'pausado',
         pause_started_at: now.toISOString(),
         total_execution_seconds: newExecSeconds,
       } as any).eq('id', ticket.id);
 
-      // 5. Log status change
       await supabase.from('ticket_status_logs').insert({
         ticket_id: ticket.id,
         changed_by: user.id,
@@ -154,6 +166,11 @@ const PauseDialog: React.FC<PauseDialogProps> = ({ open, onOpenChange, ticket, o
                 {files.map((f, i) => (
                   <div key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span className="truncate flex-1">{f.name}</span>
+                    {compressionInfo[i] && compressionInfo[i].originalSize !== compressionInfo[i].compressedSize && (
+                      <span className="text-xs text-success whitespace-nowrap">
+                        {formatFileSize(compressionInfo[i].originalSize)} → {formatFileSize(compressionInfo[i].compressedSize)}
+                      </span>
+                    )}
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeFile(i)}>
                       <X className="h-3 w-3" />
                     </Button>

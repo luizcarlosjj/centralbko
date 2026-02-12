@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
@@ -7,25 +8,28 @@ import { Ticket, PRIORITY_LABELS, TYPE_LABELS, Profile } from '@/types/tickets';
 import { ClipboardList, Clock, CheckCircle, PlayCircle } from 'lucide-react';
 
 const COLORS = ['hsl(270, 67%, 45%)', 'hsl(258, 68%, 74%)', 'hsl(142, 71%, 45%)', 'hsl(38, 92%, 50%)', 'hsl(0, 84%, 60%)'];
+const TICKET_COLUMNS = 'id, status, priority, type, assigned_analyst_id, total_execution_seconds, created_at';
 
 const MetricsDashboard = () => {
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [analysts, setAnalysts] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: tickets = [], isLoading: ticketsLoading } = useQuery({
+    queryKey: ['metrics-tickets'],
+    queryFn: async () => {
+      const { data } = await supabase.from('tickets').select(TICKET_COLUMNS).order('created_at', { ascending: false });
+      return (data || []) as unknown as Ticket[];
+    },
+    staleTime: 120_000,
+  });
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const [ticketsRes, analystsRes] = await Promise.all([
-        supabase.from('tickets').select('*').order('created_at', { ascending: false }),
-        supabase.from('profiles').select('*'),
-      ]);
-      if (ticketsRes.data) setTickets(ticketsRes.data as unknown as Ticket[]);
-      if (analystsRes.data) setAnalysts(analystsRes.data);
-      setLoading(false);
-    };
-    fetchData();
-  }, []);
+  const { data: analysts = [] } = useQuery({
+    queryKey: ['metrics-analysts'],
+    queryFn: async () => {
+      const { data } = await supabase.from('profiles').select('id, name');
+      return (data || []) as Profile[];
+    },
+    staleTime: 120_000,
+  });
 
+  const loading = ticketsLoading;
   const total = tickets.length;
   const inProgress = tickets.filter(t => t.status === 'em_andamento').length;
   const finished = tickets.filter(t => t.status === 'finalizado').length;
@@ -40,19 +44,16 @@ const MetricsDashboard = () => {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
-  // By priority
   const byPriority = Object.entries(PRIORITY_LABELS).map(([key, label]) => ({
     name: label,
     value: tickets.filter(t => t.priority === key).length,
   }));
 
-  // By type
   const byType = Object.entries(TYPE_LABELS).map(([key, label]) => ({
     name: label,
     value: tickets.filter(t => t.type === key).length,
   }));
 
-  // By analyst
   const byAnalyst = analysts.map(a => ({
     name: a.name,
     total: tickets.filter(t => t.assigned_analyst_id === a.id).length,
@@ -63,7 +64,6 @@ const MetricsDashboard = () => {
     })(),
   }));
 
-  // Timeline: tickets per day (last 30 days)
   const last30 = new Date();
   last30.setDate(last30.getDate() - 30);
   const dailyMap = new Map<string, number>();
@@ -75,7 +75,6 @@ const MetricsDashboard = () => {
     });
   const timeline = Array.from(dailyMap.entries()).map(([date, count]) => ({ date, chamados: count })).reverse();
 
-  // Ranking productivity
   const ranking = [...byAnalyst].sort((a, b) => b.finalizados - a.finalizados);
 
   return (
@@ -83,7 +82,6 @@ const MetricsDashboard = () => {
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-foreground">Dashboard de Métricas</h1>
 
-        {/* Summary Cards */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -115,9 +113,7 @@ const MetricsDashboard = () => {
           </Card>
         </div>
 
-        {/* Charts Grid */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* By Priority */}
           <Card>
             <CardHeader><CardTitle className="text-lg">Chamados por Prioridade</CardTitle></CardHeader>
             <CardContent>
@@ -132,7 +128,6 @@ const MetricsDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* By Type */}
           <Card>
             <CardHeader><CardTitle className="text-lg">Chamados por Tipo</CardTitle></CardHeader>
             <CardContent>
@@ -148,7 +143,6 @@ const MetricsDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* By Analyst */}
           <Card>
             <CardHeader><CardTitle className="text-lg">Chamados por Analista</CardTitle></CardHeader>
             <CardContent>
@@ -166,7 +160,6 @@ const MetricsDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* Timeline */}
           <Card>
             <CardHeader><CardTitle className="text-lg">Evolução por Período</CardTitle></CardHeader>
             <CardContent>
@@ -183,7 +176,6 @@ const MetricsDashboard = () => {
           </Card>
         </div>
 
-        {/* Ranking */}
         <Card>
           <CardHeader><CardTitle className="text-lg">Ranking de Produtividade</CardTitle></CardHeader>
           <CardContent>
