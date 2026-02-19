@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronLeft, ChevronRight, FileSpreadsheet, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileSpreadsheet, AlertCircle, Image as ImageIcon } from 'lucide-react';
 import { Ticket, PRIORITY_LABELS, TYPE_LABELS, STATUS_LABELS, Profile, PauseLog } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
 import ResolvePendencyDialog from '@/components/ResolvePendencyDialog';
@@ -35,6 +35,11 @@ const AnalystPanel = () => {
   const queryClient = useQueryClient();
   const [pendencyTicket, setPendencyTicket] = useState<Ticket | null>(null);
   const [activePauseLog, setActivePauseLog] = useState<PauseLog | null>(null);
+
+  // Expanded rows
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [pauseLogs, setPauseLogs] = useState<Record<string, PauseLog[]>>({});
+  const [pauseReasonNames, setPauseReasonNames] = useState<Record<string, string>>({});
 
   // Fetch backoffice profiles for displaying names
   const { data: profiles = [] } = useQuery({
@@ -167,6 +172,30 @@ const AnalystPanel = () => {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const toggleExpand = async (ticketId: string) => {
+    const next = new Set(expandedRows);
+    if (next.has(ticketId)) {
+      next.delete(ticketId);
+    } else {
+      next.add(ticketId);
+      if (!pauseLogs[ticketId]) {
+        const { data } = await supabase.from('pause_logs').select('id, ticket_id, pause_reason_id, description_text, pause_started_at, pause_ended_at, paused_seconds, created_by').eq('ticket_id', ticketId).order('pause_started_at', { ascending: false });
+        if (data) {
+          const logs = data as unknown as PauseLog[];
+          setPauseLogs(prev => ({ ...prev, [ticketId]: logs }));
+          const reasonIds = [...new Set(logs.map(l => l.pause_reason_id))].filter(id => !pauseReasonNames[id]);
+          if (reasonIds.length > 0) {
+            const { data: reasons } = await supabase.from('pause_reasons').select('id, title').in('id', reasonIds);
+            if (reasons) {
+              setPauseReasonNames(prev => ({ ...prev, ...Object.fromEntries(reasons.map(r => [r.id, r.title])) }));
+            }
+          }
+        }
+      }
+    }
+    setExpandedRows(next);
+  };
+
   const handleResolvePendency = async (ticket: Ticket) => {
     const detail = pauseDetails[ticket.id];
     if (detail) {
@@ -174,6 +203,40 @@ const AnalystPanel = () => {
       setPendencyTicket(ticket);
     }
   };
+
+  const renderExpandedDetails = (ticket: Ticket, colSpan: number) => (
+    expandedRows.has(ticket.id) && (
+      <TableRow>
+        <TableCell colSpan={colSpan} className="bg-muted/30 p-4">
+          {ticket.description && (
+            <div className="mb-3">
+              <p className="text-sm font-medium mb-1">Descrição</p>
+              <p className="text-xs text-muted-foreground bg-background rounded p-2 border">{ticket.description}</p>
+            </div>
+          )}
+          <p className="text-sm font-medium mb-2">Histórico de Pausas</p>
+          {(pauseLogs[ticket.id] || []).length === 0 ? (
+            <p className="text-xs text-muted-foreground">Nenhuma pausa registrada</p>
+          ) : (
+            <div className="space-y-2">
+              {(pauseLogs[ticket.id] || []).map(log => (
+                <div key={log.id} className="text-xs border rounded p-2 bg-background">
+                  <div className="flex justify-between">
+                    <span>Início: {new Date(log.pause_started_at).toLocaleString('pt-BR')}</span>
+                    <span>Duração: {log.pause_ended_at ? formatTime(log.paused_seconds) : 'Em andamento'}</span>
+                  </div>
+                  {pauseReasonNames[log.pause_reason_id] && (
+                    <p className="mt-1"><span className="text-muted-foreground">Motivo:</span> <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 text-xs">{pauseReasonNames[log.pause_reason_id]}</Badge></p>
+                  )}
+                  {log.description_text && <p className="mt-1 text-muted-foreground">{log.description_text}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </TableCell>
+      </TableRow>
+    )
+  );
 
   return (
     <AppLayout>
@@ -200,6 +263,7 @@ const AnalystPanel = () => {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead></TableHead>
                         <TableHead>ID</TableHead>
                         <TableHead>Base</TableHead>
                         <TableHead>Prioridade</TableHead>
@@ -211,15 +275,21 @@ const AnalystPanel = () => {
                     </TableHeader>
                     <TableBody>
                       {inProgressTickets.map(ticket => (
-                        <TableRow key={ticket.id}>
-                          <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
-                          <TableCell>{ticket.base_name}</TableCell>
-                          <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
-                          <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
-                          <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
-                          <TableCell><LiveTimer ticket={ticket} /></TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
-                        </TableRow>
+                        <React.Fragment key={ticket.id}>
+                          <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
+                            <TableCell>
+                              {expandedRows.has(ticket.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
+                            <TableCell>{ticket.base_name}</TableCell>
+                            <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                            <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
+                            <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
+                            <TableCell><LiveTimer ticket={ticket} /></TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                          </TableRow>
+                          {renderExpandedDetails(ticket, 8)}
+                        </React.Fragment>
                       ))}
                     </TableBody>
                   </Table>
@@ -251,6 +321,12 @@ const AnalystPanel = () => {
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-3">
+                        {ticket.description && (
+                          <div className="text-xs">
+                            <span className="text-muted-foreground">Descrição do chamado:</span>
+                            <p className="mt-1 bg-muted/30 rounded p-2">{ticket.description}</p>
+                          </div>
+                        )}
                         {detail ? (
                           <>
                             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -273,7 +349,7 @@ const AnalystPanel = () => {
                             </div>
                             {detail.log.description_text && (
                               <div className="text-xs">
-                                <span className="text-muted-foreground">Descrição:</span>
+                                <span className="text-muted-foreground">Descrição da pausa:</span>
                                 <p className="mt-1 bg-muted/30 rounded p-2">{detail.log.description_text}</p>
                               </div>
                             )}
@@ -314,6 +390,7 @@ const AnalystPanel = () => {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead></TableHead>
                         <TableHead>ID</TableHead>
                         <TableHead>Base</TableHead>
                         <TableHead>Prioridade</TableHead>
@@ -325,17 +402,23 @@ const AnalystPanel = () => {
                     </TableHeader>
                     <TableBody>
                       {finishedTickets.map(ticket => (
-                        <TableRow key={ticket.id}>
-                          <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
-                          <TableCell>{ticket.base_name}</TableCell>
-                          <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
-                          <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
-                          <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
-                          <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {ticket.finished_at ? new Date(ticket.finished_at).toLocaleDateString('pt-BR') : '-'}
-                          </TableCell>
-                        </TableRow>
+                        <React.Fragment key={ticket.id}>
+                          <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
+                            <TableCell>
+                              {expandedRows.has(ticket.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
+                            <TableCell>{ticket.base_name}</TableCell>
+                            <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                            <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
+                            <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
+                            <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {ticket.finished_at ? new Date(ticket.finished_at).toLocaleDateString('pt-BR') : '-'}
+                            </TableCell>
+                          </TableRow>
+                          {renderExpandedDetails(ticket, 8)}
+                        </React.Fragment>
                       ))}
                     </TableBody>
                   </Table>
