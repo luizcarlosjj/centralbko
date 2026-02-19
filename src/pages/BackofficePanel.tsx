@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Pause, Play, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
+import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, TicketStatus, PauseLog } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
@@ -139,29 +139,7 @@ const AnalystPanel = () => {
     setExpandedRows(next);
   };
 
-  const resumeTicket = async (ticket: Ticket) => {
-    if (!user) return;
-    const now = new Date();
-    const { data: activePause } = await supabase.from('pause_logs').select('id, pause_started_at').eq('ticket_id', ticket.id).is('pause_ended_at', null).single();
-    
-    if (activePause) {
-      const pausedSecs = Math.floor((now.getTime() - new Date((activePause as any).pause_started_at).getTime()) / 1000);
-      await supabase.from('pause_logs').update({ pause_ended_at: now.toISOString(), paused_seconds: pausedSecs } as any).eq('id', (activePause as any).id);
-    }
-
-    const pausedSecsToAdd = ticket.pause_started_at
-      ? Math.floor((now.getTime() - new Date(ticket.pause_started_at).getTime()) / 1000)
-      : 0;
-
-    await supabase.from('tickets').update({
-      status: 'em_andamento', started_at: now.toISOString(), pause_started_at: null,
-      total_paused_seconds: (ticket.total_paused_seconds || 0) + pausedSecsToAdd,
-    } as any).eq('id', ticket.id);
-
-    await supabase.from('ticket_status_logs').insert({ ticket_id: ticket.id, changed_by: user.id, old_status: 'pausado', new_status: 'em_andamento' });
-    toast({ title: 'Chamado retomado' });
-    invalidateTickets();
-  };
+  // resumeTicket removed - backoffice cannot resume, only analyst can resolve pendency
 
   const finalizeTicket = async (ticket: Ticket) => {
     if (!user) return;
@@ -343,14 +321,7 @@ const AnalystPanel = () => {
                                 </div>
                               )}
                               {ticket.status === 'pausado' && (
-                                <div className="flex gap-1">
-                                  <Button size="sm" onClick={() => resumeTicket(ticket)}>
-                                    <Play className="mr-1 h-3 w-3" /> Retomar
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => finalizeTicket(ticket)}>
-                                    <CheckCircle className="mr-1 h-3 w-3" /> Finalizar
-                                  </Button>
-                                </div>
+                                <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 text-xs">Aguardando Analista</Badge>
                               )}
                             </TableCell>
                           </TableRow>
@@ -430,7 +401,7 @@ const AnalystPanel = () => {
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_paused_seconds || 0)}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">
-                              {ticket.finished_at ? new Date(ticket.finished_at).toLocaleDateString('pt-BR') : '-'}
+                              {ticket.finished_at ? `${new Date(ticket.finished_at).toLocaleDateString('pt-BR')} ${new Date(ticket.finished_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : '-'}
                             </TableCell>
                           </TableRow>
                           {expandedRows.has(ticket.id) && (

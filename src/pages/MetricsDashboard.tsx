@@ -4,16 +4,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
-import { Ticket, PRIORITY_LABELS, TYPE_LABELS, Profile } from '@/types/tickets';
-import { ClipboardList, Clock, CheckCircle, PlayCircle } from 'lucide-react';
+import { Ticket, PRIORITY_LABELS, TYPE_LABELS, Profile, UserRole } from '@/types/tickets';
+import { ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, Users } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 const COLORS = ['hsl(270, 67%, 45%)', 'hsl(258, 68%, 74%)', 'hsl(142, 71%, 45%)', 'hsl(38, 92%, 50%)', 'hsl(0, 84%, 60%)'];
-const TICKET_COLUMNS = 'id, status, priority, type, assigned_analyst_id, total_execution_seconds, created_at';
+const TICKET_COLUMNS = 'id, status, priority, type, assigned_analyst_id, requester_user_id, total_execution_seconds, total_paused_seconds, created_at, finished_at';
 
 const MetricsDashboard = () => {
   const queryClient = useQueryClient();
 
-  // Realtime subscription for live metric updates
   useEffect(() => {
     const channel = supabase
       .channel('metrics-tickets-realtime')
@@ -24,7 +24,7 @@ const MetricsDashboard = () => {
     return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
 
-  const { data: tickets = [], isLoading: ticketsLoading } = useQuery({
+  const { data: tickets = [] } = useQuery({
     queryKey: ['metrics-tickets'],
     queryFn: async () => {
       const { data } = await supabase.from('tickets').select(TICKET_COLUMNS).order('created_at', { ascending: false });
@@ -33,8 +33,8 @@ const MetricsDashboard = () => {
     staleTime: 120_000,
   });
 
-  const { data: analysts = [] } = useQuery({
-    queryKey: ['metrics-analysts'],
+  const { data: profiles = [] } = useQuery({
+    queryKey: ['metrics-profiles'],
     queryFn: async () => {
       const { data } = await supabase.from('profiles').select('id, name');
       return (data || []) as Profile[];
@@ -42,13 +42,28 @@ const MetricsDashboard = () => {
     staleTime: 120_000,
   });
 
-  const loading = ticketsLoading;
+  const { data: userRoles = [] } = useQuery({
+    queryKey: ['metrics-user-roles'],
+    queryFn: async () => {
+      // Supervisors can read all roles via has_role function, but user_roles RLS only allows own role.
+      // We'll use the manage-users edge function or fall back to treating all profiles with assigned tickets as backoffice
+      // and all with requester tickets as analysts. This is a practical heuristic.
+      const { data } = await supabase.from('user_roles').select('user_id, role');
+      return (data || []) as Pick<UserRole, 'user_id' | 'role'>[];
+    },
+    staleTime: 120_000,
+  });
+
   const total = tickets.length;
   const inProgress = tickets.filter(t => t.status === 'em_andamento').length;
+  const paused = tickets.filter(t => t.status === 'pausado').length;
   const finished = tickets.filter(t => t.status === 'finalizado').length;
   const finishedTickets = tickets.filter(t => t.status === 'finalizado');
   const avgTime = finished > 0
     ? Math.round(finishedTickets.reduce((a, t) => a + (t.total_execution_seconds || 0), 0) / finished)
+    : 0;
+  const avgPausedTime = finished > 0
+    ? Math.round(finishedTickets.reduce((a, t) => a + (t.total_paused_seconds || 0), 0) / finished)
     : 0;
 
   const formatTime = (seconds: number) => {
@@ -57,6 +72,56 @@ const MetricsDashboard = () => {
     const s = seconds % 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  const getProfileName = (id: string) => profiles.find(p => p.id === id)?.name || id.slice(0, 8);
+
+  // Separate analysts and backoffice users
+  const backofficeUserIds = new Set(userRoles.filter(r => r.role === 'backoffice').map(r => r.user_id));
+  const analystUserIds = new Set(userRoles.filter(r => r.role === 'analyst').map(r => r.user_id));
+
+  // Backoffice ranking (by assigned tickets)
+  const backofficeRanking = profiles
+    .filter(p => backofficeUserIds.has(p.id))
+    .map(p => {
+      const assignedTickets = tickets.filter(t => t.assigned_analyst_id === p.id);
+      const finishedByUser = assignedTickets.filter(t => t.status === 'finalizado');
+      const inProgressByUser = assignedTickets.filter(t => t.status === 'em_andamento').length;
+      const pausedByUser = assignedTickets.filter(t => t.status === 'pausado').length;
+      const avgExec = finishedByUser.length > 0
+        ? Math.round(finishedByUser.reduce((s, t) => s + (t.total_execution_seconds || 0), 0) / finishedByUser.length)
+        : 0;
+      const avgPause = finishedByUser.length > 0
+        ? Math.round(finishedByUser.reduce((s, t) => s + (t.total_paused_seconds || 0), 0) / finishedByUser.length)
+        : 0;
+      return {
+        name: p.name,
+        total: assignedTickets.length,
+        finalizados: finishedByUser.length,
+        emAndamento: inProgressByUser,
+        pausados: pausedByUser,
+        tempoMedio: avgExec,
+        tempoPausaMedio: avgPause,
+      };
+    })
+    .sort((a, b) => b.finalizados - a.finalizados);
+
+  // Analyst ranking (by requester)
+  const analystRanking = profiles
+    .filter(p => analystUserIds.has(p.id))
+    .map(p => {
+      const requestedTickets = tickets.filter(t => t.requester_user_id === p.id);
+      const finishedByUser = requestedTickets.filter(t => t.status === 'finalizado').length;
+      const pendingByUser = requestedTickets.filter(t => t.status === 'pausado').length;
+      const inProgressByUser = requestedTickets.filter(t => t.status === 'em_andamento').length;
+      return {
+        name: p.name,
+        total: requestedTickets.length,
+        finalizados: finishedByUser,
+        emAndamento: inProgressByUser,
+        pendentes: pendingByUser,
+      };
+    })
+    .sort((a, b) => b.total - a.total);
 
   const byPriority = Object.entries(PRIORITY_LABELS).map(([key, label]) => ({
     name: label,
@@ -68,14 +133,11 @@ const MetricsDashboard = () => {
     value: tickets.filter(t => t.type === key).length,
   }));
 
-  const byAnalyst = analysts.map(a => ({
-    name: a.name,
-    total: tickets.filter(t => t.assigned_analyst_id === a.id).length,
-    finalizados: tickets.filter(t => t.assigned_analyst_id === a.id && t.status === 'finalizado').length,
-    tempoMedio: (() => {
-      const at = finishedTickets.filter(t => t.assigned_analyst_id === a.id);
-      return at.length > 0 ? Math.round(at.reduce((s, t) => s + (t.total_execution_seconds || 0), 0) / at.length) : 0;
-    })(),
+  const byBackoffice = backofficeRanking.map(b => ({
+    name: b.name,
+    total: b.total,
+    finalizados: b.finalizados,
+    tempoMedio: b.tempoMedio,
   }));
 
   const last30 = new Date();
@@ -89,44 +151,125 @@ const MetricsDashboard = () => {
     });
   const timeline = Array.from(dailyMap.entries()).map(([date, count]) => ({ date, chamados: count })).reverse();
 
-  const ranking = [...byAnalyst].sort((a, b) => b.finalizados - a.finalizados);
-
   return (
     <AppLayout>
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-foreground">Dashboard de Métricas</h1>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Rankings side by side at top */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total</CardTitle>
-              <ClipboardList className="h-4 w-4 text-muted-foreground" />
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                Ranking Backoffice
+              </CardTitle>
             </CardHeader>
-            <CardContent><p className="text-3xl font-bold">{total}</p></CardContent>
+            <CardContent>
+              <div className="space-y-3">
+                {backofficeRanking.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Nenhum backoffice encontrado</p>}
+                {backofficeRanking.map((b, i) => (
+                  <div key={b.name} className="flex items-start gap-3 rounded-lg border p-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary shrink-0">
+                      {i + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground">{b.name}</p>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        <Badge variant="outline" className="text-xs">{b.finalizados} finalizados</Badge>
+                        <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20">{b.emAndamento} em andamento</Badge>
+                        <Badge variant="outline" className="text-xs bg-warning/10 text-warning border-warning/20">{b.pausados} pausados</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {b.total} total · Exec. média: {formatTime(b.tempoMedio)} · Pausa média: {formatTime(b.tempoPausaMedio)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
           </Card>
+
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Em Andamento</CardTitle>
-              <PlayCircle className="h-4 w-4 text-primary" />
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Users className="h-5 w-5 text-info" />
+                Ranking Analistas (Solicitantes)
+              </CardTitle>
             </CardHeader>
-            <CardContent><p className="text-3xl font-bold text-primary">{inProgress}</p></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Finalizados</CardTitle>
-              <CheckCircle className="h-4 w-4 text-success" />
-            </CardHeader>
-            <CardContent><p className="text-3xl font-bold text-success">{finished}</p></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Tempo Médio</CardTitle>
-              <Clock className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent><p className="text-3xl font-bold">{formatTime(avgTime)}</p></CardContent>
+            <CardContent>
+              <div className="space-y-3">
+                {analystRanking.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Nenhum analista encontrado</p>}
+                {analystRanking.map((a, i) => (
+                  <div key={a.name} className="flex items-start gap-3 rounded-lg border p-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-info/10 text-sm font-bold text-info shrink-0">
+                      {i + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground">{a.name}</p>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        <Badge variant="outline" className="text-xs">{a.total} abertos</Badge>
+                        <Badge variant="outline" className="text-xs bg-success/10 text-success border-success/20">{a.finalizados} finalizados</Badge>
+                        <Badge variant="outline" className="text-xs bg-warning/10 text-warning border-warning/20">{a.pendentes} pendentes</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {a.emAndamento} em andamento
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
           </Card>
         </div>
 
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Total</CardTitle>
+              <ClipboardList className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold">{total}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Em Andamento</CardTitle>
+              <PlayCircle className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold text-primary">{inProgress}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Pausados</CardTitle>
+              <PauseCircle className="h-4 w-4 text-warning" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold text-warning">{paused}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Finalizados</CardTitle>
+              <CheckCircle className="h-4 w-4 text-success" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold text-success">{finished}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Exec. Média</CardTitle>
+              <Clock className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold">{formatTime(avgTime)}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Pausa Média</CardTitle>
+              <PauseCircle className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold">{formatTime(avgPausedTime)}</p></CardContent>
+          </Card>
+        </div>
+
+        {/* Charts */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader><CardTitle className="text-lg">Chamados por Prioridade</CardTitle></CardHeader>
@@ -158,17 +301,17 @@ const MetricsDashboard = () => {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-lg">Chamados por Analista</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-lg">Desempenho por Backoffice</CardTitle></CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={byAnalyst}>
+                <BarChart data={byBackoffice}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                   <YAxis allowDecimals={false} />
                   <Tooltip />
                   <Legend />
                   <Bar dataKey="total" fill="hsl(270, 67%, 45%)" name="Total" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="finalizados" fill="hsl(258, 68%, 74%)" name="Finalizados" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="finalizados" fill="hsl(142, 71%, 45%)" name="Finalizados" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -189,28 +332,6 @@ const MetricsDashboard = () => {
             </CardContent>
           </Card>
         </div>
-
-        <Card>
-          <CardHeader><CardTitle className="text-lg">Ranking de Produtividade</CardTitle></CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {ranking.map((a, i) => (
-                <div key={a.name} className="flex items-center gap-4 rounded-lg border p-3">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                    {i + 1}
-                  </span>
-                  <div className="flex-1">
-                    <p className="font-medium text-foreground">{a.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {a.finalizados} finalizados · {a.total} total · Tempo médio: {formatTime(a.tempoMedio)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              {ranking.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Nenhum analista encontrado</p>}
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </AppLayout>
   );

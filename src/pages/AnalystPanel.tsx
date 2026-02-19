@@ -414,7 +414,7 @@ const AnalystPanel = () => {
                             <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">
-                              {ticket.finished_at ? new Date(ticket.finished_at).toLocaleDateString('pt-BR') : '-'}
+                              {ticket.finished_at ? `${new Date(ticket.finished_at).toLocaleDateString('pt-BR')} ${new Date(ticket.finished_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : '-'}
                             </TableCell>
                           </TableRow>
                           {renderExpandedDetails(ticket, 8)}
