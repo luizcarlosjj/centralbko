@@ -17,6 +17,7 @@ export interface Ticket {
   total_paused_seconds: number;
   assigned_analyst_id: string | null;
   pause_started_at: string | null;
+  attachment_url: string | null;
 }
 
 export interface TicketStatusLog {
