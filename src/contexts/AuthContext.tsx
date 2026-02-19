@@ -89,11 +89,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   }, [user?.id]);
 
-  // Step 3: Loading is only false when both session and profile are resolved
+  // Step 3: Loading reflects whether both session and profile are resolved
   useEffect(() => {
-    if (sessionResolved && profileResolved) {
-      setLoading(false);
-    }
+    const isReady = sessionResolved && profileResolved;
+    setLoading(!isReady);
   }, [sessionResolved, profileResolved]);
 
   const signIn = async (email: string, password: string) => {
