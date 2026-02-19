@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { Ticket } from '@/types/tickets';
+import { calculateBusinessSeconds } from '@/lib/business-time';
 
 const formatTime = (totalSeconds: number) => {
   const h = Math.floor(totalSeconds / 3600);
@@ -35,7 +36,7 @@ const LiveTimer: React.FC<LiveTimerProps> = ({ ticket }) => {
 function computeTime(ticket: Ticket): number {
   const base = ticket.total_execution_seconds || 0;
   if (ticket.status === 'em_andamento' && ticket.started_at) {
-    const elapsed = Math.floor((Date.now() - new Date(ticket.started_at).getTime()) / 1000);
+    const elapsed = calculateBusinessSeconds(new Date(ticket.started_at), new Date());
     return base + Math.max(0, elapsed);
   }
   return base;

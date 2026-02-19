@@ -149,6 +149,80 @@ export type Database = {
         }
         Relationships: []
       }
+      pause_response_files: {
+        Row: {
+          created_at: string
+          file_url: string
+          id: string
+          pause_response_id: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          file_url: string
+          id?: string
+          pause_response_id: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          file_url?: string
+          id?: string
+          pause_response_id?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pause_response_files_pause_response_id_fkey"
+            columns: ["pause_response_id"]
+            isOneToOne: false
+            referencedRelation: "pause_responses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pause_responses: {
+        Row: {
+          created_at: string
+          description_text: string
+          id: string
+          pause_log_id: string
+          responded_by: string
+          ticket_id: string
+        }
+        Insert: {
+          created_at?: string
+          description_text: string
+          id?: string
+          pause_log_id: string
+          responded_by: string
+          ticket_id: string
+        }
+        Update: {
+          created_at?: string
+          description_text?: string
+          id?: string
+          pause_log_id?: string
+          responded_by?: string
+          ticket_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pause_responses_pause_log_id_fkey"
+            columns: ["pause_log_id"]
+            isOneToOne: false
+            referencedRelation: "pause_logs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pause_responses_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -214,6 +288,7 @@ export type Database = {
           pause_started_at: string | null
           priority: string
           requester_name: string
+          requester_user_id: string | null
           started_at: string | null
           status: string
           total_execution_seconds: number
@@ -231,6 +306,7 @@ export type Database = {
           pause_started_at?: string | null
           priority: string
           requester_name: string
+          requester_user_id?: string | null
           started_at?: string | null
           status?: string
           total_execution_seconds?: number
@@ -248,13 +324,22 @@ export type Database = {
           pause_started_at?: string | null
           priority?: string
           requester_name?: string
+          requester_user_id?: string | null
           started_at?: string | null
           status?: string
           total_execution_seconds?: number
           total_paused_seconds?: number
           type?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "tickets_requester_user_id_fkey"
+            columns: ["requester_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
@@ -288,7 +373,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "supervisor" | "analyst"
+      app_role: "supervisor" | "analyst" | "backoffice"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -416,7 +501,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["supervisor", "analyst"],
+      app_role: ["supervisor", "analyst", "backoffice"],
     },
   },
 } as const

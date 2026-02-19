@@ -6,6 +6,7 @@ export interface Ticket {
   id: string;
   base_name: string;
   requester_name: string;
+  requester_user_id: string | null;
   priority: TicketPriority;
   type: TicketType;
   description: string;
@@ -18,6 +19,23 @@ export interface Ticket {
   assigned_analyst_id: string | null;
   pause_started_at: string | null;
   attachment_url: string | null;
+}
+
+export interface PauseResponse {
+  id: string;
+  pause_log_id: string;
+  ticket_id: string;
+  description_text: string;
+  responded_by: string;
+  created_at: string;
+}
+
+export interface PauseResponseFile {
+  id: string;
+  pause_response_id: string;
+  file_url: string;
+  uploaded_by: string;
+  created_at: string;
 }
 
 export interface TicketStatusLog {
@@ -35,7 +53,7 @@ export interface Profile {
   created_at: string;
 }
 
-export type AppRole = 'supervisor' | 'analyst';
+export type AppRole = 'supervisor' | 'analyst' | 'backoffice';
 
 export interface UserRole {
   id: string;

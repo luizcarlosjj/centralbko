@@ -2,6 +2,7 @@ import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Navigate } from 'react-router-dom';
 import AnalystPanel from '@/pages/AnalystPanel';
+import BackofficePanel from '@/pages/BackofficePanel';
 import SupervisorPanel from '@/pages/SupervisorPanel';
 
 const Dashboard = () => {
@@ -16,6 +17,7 @@ const Dashboard = () => {
   }
 
   if (role === 'analyst') return <AnalystPanel />;
+  if (role === 'backoffice') return <BackofficePanel />;
   if (role === 'supervisor') return <SupervisorPanel />;
 
   return <Navigate to="/login" replace />;

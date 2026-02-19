@@ -18,7 +18,7 @@ interface ManagedUser {
   id: string;
   name: string;
   created_at: string;
-  role: 'analyst' | 'supervisor' | null;
+  role: 'analyst' | 'backoffice' | 'supervisor' | null;
 }
 
 const UserManagement = () => {
@@ -32,7 +32,7 @@ const UserManagement = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [newRole, setNewRole] = useState<string>('analyst');
+  const [newRole, setNewRole] = useState<string>('backoffice');
 
   const fetchUsers = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -68,7 +68,7 @@ const UserManagement = () => {
       setNewEmail('');
       setNewName('');
       setNewPassword('');
-      setNewRole('analyst');
+      setNewRole('backoffice');
       setDialogOpen(false);
       fetchUsers();
     }
@@ -128,7 +128,8 @@ const UserManagement = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="analyst">Analista</SelectItem>
+                      <SelectItem value="analyst">Analista (Solicitante)</SelectItem>
+                      <SelectItem value="backoffice">Backoffice</SelectItem>
                       <SelectItem value="supervisor">Supervisor</SelectItem>
                     </SelectContent>
                   </Select>
@@ -168,7 +169,7 @@ const UserManagement = () => {
                       <TableCell className="font-medium">{u.name}</TableCell>
                       <TableCell>
                         <Badge variant={u.role === 'supervisor' ? 'default' : 'secondary'}>
-                          {u.role === 'supervisor' ? 'Supervisor' : u.role === 'analyst' ? 'Analista' : 'Sem perfil'}
+                          {u.role === 'supervisor' ? 'Supervisor' : u.role === 'backoffice' ? 'Backoffice' : u.role === 'analyst' ? 'Analista' : 'Sem perfil'}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
