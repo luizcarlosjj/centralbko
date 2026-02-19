@@ -17,7 +17,7 @@ import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
 
-const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url';
+const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, description';
 const PAGE_SIZE = 20;
 
 const priorityColor: Record<string, string> = {
@@ -49,9 +49,10 @@ const AnalystPanel = () => {
   const [openPage, setOpenPage] = useState(0);
   const [finishedPage, setFinishedPage] = useState(0);
 
-  // Expanded rows for finished tickets
+  // Expanded rows for tickets (open + finished)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [pauseLogs, setPauseLogs] = useState<Record<string, PauseLog[]>>({});
+  const [pauseReasonNames, setPauseReasonNames] = useState<Record<string, string>>({});
 
   const { data: openData, isLoading: openLoading } = useQuery({
     queryKey: ['analyst-open-tickets', user?.id, openPage],
@@ -121,7 +122,18 @@ const AnalystPanel = () => {
       next.add(ticketId);
       if (!pauseLogs[ticketId]) {
         const { data } = await supabase.from('pause_logs').select('id, ticket_id, pause_reason_id, description_text, pause_started_at, pause_ended_at, paused_seconds, created_by').eq('ticket_id', ticketId).order('pause_started_at', { ascending: false });
-        if (data) setPauseLogs(prev => ({ ...prev, [ticketId]: data as unknown as PauseLog[] }));
+        if (data) {
+          const logs = data as unknown as PauseLog[];
+          setPauseLogs(prev => ({ ...prev, [ticketId]: logs }));
+          // Fetch reason names
+          const reasonIds = [...new Set(logs.map(l => l.pause_reason_id))].filter(id => !pauseReasonNames[id]);
+          if (reasonIds.length > 0) {
+            const { data: reasons } = await supabase.from('pause_reasons').select('id, title').in('id', reasonIds);
+            if (reasons) {
+              setPauseReasonNames(prev => ({ ...prev, ...Object.fromEntries(reasons.map(r => [r.id, r.title])) }));
+            }
+          }
+        }
       }
     }
     setExpandedRows(next);
@@ -282,6 +294,7 @@ const AnalystPanel = () => {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead></TableHead>
                         <TableHead>ID</TableHead>
                         <TableHead>Base</TableHead>
                         <TableHead>Solicitante</TableHead>
@@ -296,47 +309,83 @@ const AnalystPanel = () => {
                     </TableHeader>
                     <TableBody>
                       {filteredOpen.map(ticket => (
-                        <TableRow key={ticket.id}>
-                          <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
-                          <TableCell>{ticket.base_name}</TableCell>
-                          <TableCell>{ticket.requester_name}</TableCell>
-                          <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
-                          <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
-                          <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
-                          <TableCell>
-                            {ticket.attachment_url ? (
-                              <a href={ticket.attachment_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline text-xs">
-                                <FileSpreadsheet className="h-3 w-3" /> Baixar
-                              </a>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell><LiveTimer ticket={ticket} /></TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
-                          <TableCell>
-                            {ticket.status === 'em_andamento' && (
-                              <div className="flex gap-1">
-                                <Button size="sm" variant="outline" onClick={() => setPauseDialogTicket(ticket)}>
-                                  <Pause className="mr-1 h-3 w-3" /> Pausar
-                                </Button>
-                                <Button size="sm" onClick={() => finalizeTicket(ticket)}>
-                                  <CheckCircle className="mr-1 h-3 w-3" /> Finalizar
-                                </Button>
-                              </div>
-                            )}
-                            {ticket.status === 'pausado' && (
-                              <div className="flex gap-1">
-                                <Button size="sm" onClick={() => resumeTicket(ticket)}>
-                                  <Play className="mr-1 h-3 w-3" /> Retomar
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => finalizeTicket(ticket)}>
-                                  <CheckCircle className="mr-1 h-3 w-3" /> Finalizar
-                                </Button>
-                              </div>
-                            )}
-                          </TableCell>
-                        </TableRow>
+                        <React.Fragment key={ticket.id}>
+                          <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
+                            <TableCell>
+                              {expandedRows.has(ticket.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
+                            <TableCell>{ticket.base_name}</TableCell>
+                            <TableCell>{ticket.requester_name}</TableCell>
+                            <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                            <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
+                            <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
+                            <TableCell>
+                              {ticket.attachment_url ? (
+                                <a href={ticket.attachment_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline text-xs" onClick={e => e.stopPropagation()}>
+                                  <FileSpreadsheet className="h-3 w-3" /> Baixar
+                                </a>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell><LiveTimer ticket={ticket} /></TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                            <TableCell onClick={e => e.stopPropagation()}>
+                              {ticket.status === 'em_andamento' && (
+                                <div className="flex gap-1">
+                                  <Button size="sm" variant="outline" onClick={() => setPauseDialogTicket(ticket)}>
+                                    <Pause className="mr-1 h-3 w-3" /> Pausar
+                                  </Button>
+                                  <Button size="sm" onClick={() => finalizeTicket(ticket)}>
+                                    <CheckCircle className="mr-1 h-3 w-3" /> Finalizar
+                                  </Button>
+                                </div>
+                              )}
+                              {ticket.status === 'pausado' && (
+                                <div className="flex gap-1">
+                                  <Button size="sm" onClick={() => resumeTicket(ticket)}>
+                                    <Play className="mr-1 h-3 w-3" /> Retomar
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => finalizeTicket(ticket)}>
+                                    <CheckCircle className="mr-1 h-3 w-3" /> Finalizar
+                                  </Button>
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                          {expandedRows.has(ticket.id) && (
+                            <TableRow>
+                              <TableCell colSpan={12} className="bg-muted/30 p-4">
+                                {ticket.description && (
+                                  <div className="mb-3">
+                                    <p className="text-sm font-medium mb-1">Descrição</p>
+                                    <p className="text-xs text-muted-foreground bg-background rounded p-2 border">{ticket.description}</p>
+                                  </div>
+                                )}
+                                <p className="text-sm font-medium mb-2">Histórico de Pausas</p>
+                                {(pauseLogs[ticket.id] || []).length === 0 ? (
+                                  <p className="text-xs text-muted-foreground">Nenhuma pausa registrada</p>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {(pauseLogs[ticket.id] || []).map(log => (
+                                      <div key={log.id} className="text-xs border rounded p-2 bg-background">
+                                        <div className="flex justify-between">
+                                          <span>Início: {new Date(log.pause_started_at).toLocaleString('pt-BR')}</span>
+                                          <span>Duração: {log.pause_ended_at ? formatTime(log.paused_seconds) : 'Em andamento'}</span>
+                                        </div>
+                                        {pauseReasonNames[log.pause_reason_id] && (
+                                          <p className="mt-1"><span className="text-muted-foreground">Motivo:</span> <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 text-xs">{pauseReasonNames[log.pause_reason_id]}</Badge></p>
+                                        )}
+                                        {log.description_text && <p className="mt-1 text-muted-foreground">{log.description_text}</p>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </React.Fragment>
                       ))}
                     </TableBody>
                   </Table>
@@ -387,6 +436,12 @@ const AnalystPanel = () => {
                           {expandedRows.has(ticket.id) && (
                             <TableRow>
                               <TableCell colSpan={9} className="bg-muted/30 p-4">
+                                {ticket.description && (
+                                  <div className="mb-3">
+                                    <p className="text-sm font-medium mb-1">Descrição</p>
+                                    <p className="text-xs text-muted-foreground bg-background rounded p-2 border">{ticket.description}</p>
+                                  </div>
+                                )}
                                 <p className="text-sm font-medium mb-2">Histórico de Pausas</p>
                                 {(pauseLogs[ticket.id] || []).length === 0 ? (
                                   <p className="text-xs text-muted-foreground">Nenhuma pausa registrada</p>
@@ -396,8 +451,11 @@ const AnalystPanel = () => {
                                       <div key={log.id} className="text-xs border rounded p-2 bg-background">
                                         <div className="flex justify-between">
                                           <span>Início: {new Date(log.pause_started_at).toLocaleString('pt-BR')}</span>
-                                          <span>Duração: {formatTime(log.paused_seconds)}</span>
+                                          <span>Duração: {log.pause_ended_at ? formatTime(log.paused_seconds) : 'Em andamento'}</span>
                                         </div>
+                                        {pauseReasonNames[log.pause_reason_id] && (
+                                          <p className="mt-1"><span className="text-muted-foreground">Motivo:</span> <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 text-xs">{pauseReasonNames[log.pause_reason_id]}</Badge></p>
+                                        )}
                                         {log.description_text && <p className="mt-1 text-muted-foreground">{log.description_text}</p>}
                                       </div>
                                     ))}
