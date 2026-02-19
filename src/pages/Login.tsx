@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -58,9 +58,6 @@ const Login = () => {
               <LogIn className="mr-2 h-4 w-4" />
               {loading ? 'Entrando...' : 'Entrar'}
             </Button>
-            <Link to="/" className="block text-center text-sm text-muted-foreground hover:text-primary transition-colors">
-              ← Abrir chamado público
-            </Link>
           </form>
         </CardContent>
       </Card>

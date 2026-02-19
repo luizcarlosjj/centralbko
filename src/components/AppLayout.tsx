@@ -2,21 +2,13 @@ import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { LogOut, LayoutDashboard, BarChart3, Users, Headphones, PauseCircle } from 'lucide-react';
+import { LogOut, LayoutDashboard, BarChart3, Users, Headphones, PauseCircle, PlusCircle } from 'lucide-react';
 import NotificationBell from '@/components/NotificationBell';
 import ThemeToggle from '@/components/ThemeToggle';
 import { NavLink } from '@/components/NavLink';
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarTrigger,
+  Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
 } from '@/components/ui/sidebar';
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -25,15 +17,14 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
 
   const handleSignOut = async () => {
-    try {
-      await signOut();
-    } finally {
-      navigate('/login');
-    }
+    try { await signOut(); } finally { navigate('/login'); }
   };
 
   const navItems = [
     { title: 'Painel', url: '/dashboard', icon: LayoutDashboard },
+    ...(role === 'analyst'
+      ? [{ title: 'Abrir Chamado', url: '/new-ticket', icon: PlusCircle }]
+      : []),
     ...(role === 'supervisor'
       ? [
           { title: 'Métricas', url: '/metrics', icon: BarChart3 },
@@ -42,6 +33,8 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         ]
       : []),
   ];
+
+  const roleLabel = role === 'supervisor' ? 'Supervisor' : role === 'backoffice' ? 'Backoffice' : 'Analista';
 
   return (
     <SidebarProvider>
@@ -76,9 +69,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                           >
                             <item.icon className="h-4 w-4" />
                             <span>{item.title}</span>
-                            {isActive && (
-                              <span className="ml-auto h-2 w-2 rounded-full bg-primary-foreground" />
-                            )}
+                            {isActive && <span className="ml-auto h-2 w-2 rounded-full bg-primary-foreground" />}
                           </NavLink>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -89,10 +80,9 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             </SidebarGroup>
           </SidebarContent>
 
-          {/* Footer */}
           <div className="mt-auto border-t border-sidebar-border p-4 space-y-3">
             <div className="flex items-center justify-between">
-              {role === 'analyst' && <NotificationBell />}
+              {(role === 'analyst' || role === 'backoffice') && <NotificationBell />}
               <ThemeToggle />
             </div>
             <div className="flex items-center gap-3">
@@ -103,9 +93,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 <p className="text-sm font-medium text-sidebar-foreground truncate">
                   {profile?.name || 'Usuário'}
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  {role === 'supervisor' ? 'Supervisor' : 'Analista'}
-                </p>
+                <p className="text-xs text-muted-foreground">{roleLabel}</p>
               </div>
               <Button variant="ghost" size="icon" onClick={handleSignOut} className="text-muted-foreground hover:text-destructive transition-colors">
                 <LogOut className="h-4 w-4" />

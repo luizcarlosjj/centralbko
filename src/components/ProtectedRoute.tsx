@@ -1,10 +1,11 @@
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Navigate } from 'react-router-dom';
+import type { AppRole } from '@/types/tickets';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  allowedRoles?: ('analyst' | 'supervisor')[];
+  allowedRoles?: AppRole[];
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
