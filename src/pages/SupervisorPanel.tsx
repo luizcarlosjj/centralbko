@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, Profile } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
 import PauseDetailsDialog from '@/components/PauseDetailsDialog';
@@ -111,6 +111,7 @@ const SupervisorPanel = () => {
 
   // Summary stats from current page (approximate for filtered view)
   const inProgress = tickets.filter(t => t.status === 'em_andamento').length;
+  const paused = tickets.filter(t => t.status === 'pausado').length;
   const finished = tickets.filter(t => t.status === 'finalizado').length;
   const finishedAll = tickets.filter(t => t.status === 'finalizado');
   const avgTime = finishedAll.length > 0
@@ -139,7 +140,7 @@ const SupervisorPanel = () => {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total</CardTitle>
@@ -153,6 +154,13 @@ const SupervisorPanel = () => {
               <PlayCircle className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent><p className="text-3xl font-bold text-primary">{inProgress}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Em Pausa</CardTitle>
+              <PauseCircle className="h-4 w-4 text-warning" />
+            </CardHeader>
+            <CardContent><p className="text-3xl font-bold text-warning">{paused}</p></CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
