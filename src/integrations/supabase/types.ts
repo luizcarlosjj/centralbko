@@ -205,6 +205,7 @@ export type Database = {
       tickets: {
         Row: {
           assigned_analyst_id: string | null
+          attachment_url: string | null
           base_name: string
           created_at: string
           description: string
@@ -221,6 +222,7 @@ export type Database = {
         }
         Insert: {
           assigned_analyst_id?: string | null
+          attachment_url?: string | null
           base_name: string
           created_at?: string
           description: string
@@ -237,6 +239,7 @@ export type Database = {
         }
         Update: {
           assigned_analyst_id?: string | null
+          attachment_url?: string | null
           base_name?: string
           created_at?: string
           description?: string

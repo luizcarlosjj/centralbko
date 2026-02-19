@@ -11,13 +11,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Pause, Play, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Pause, Play, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, TicketStatus, PauseLog } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
 
-const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id';
+const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url';
 const PAGE_SIZE = 20;
 
 const priorityColor: Record<string, string> = {
@@ -286,11 +286,12 @@ const AnalystPanel = () => {
                         <TableHead>Base</TableHead>
                         <TableHead>Solicitante</TableHead>
                         <TableHead>Prioridade</TableHead>
-                        <TableHead>Tipo</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Tempo</TableHead>
-                        <TableHead>Data</TableHead>
-                        <TableHead>Ações</TableHead>
+                         <TableHead>Tipo</TableHead>
+                         <TableHead>Status</TableHead>
+                         <TableHead>Anexo</TableHead>
+                         <TableHead>Tempo</TableHead>
+                         <TableHead>Data</TableHead>
+                         <TableHead>Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -302,6 +303,15 @@ const AnalystPanel = () => {
                           <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
                           <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
                           <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
+                          <TableCell>
+                            {ticket.attachment_url ? (
+                              <a href={ticket.attachment_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline text-xs">
+                                <FileSpreadsheet className="h-3 w-3" /> Baixar
+                              </a>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
                           <TableCell><LiveTimer ticket={ticket} /></TableCell>
                           <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
                           <TableCell>
