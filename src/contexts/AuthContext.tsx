@@ -26,6 +26,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sessionResolved, setSessionResolved] = useState(false);
   const [profileResolved, setProfileResolved] = useState(false);
   const fetchingRef = useRef(false);
+  const lastFetchedUserId = useRef<string | null>(null);
 
   // Step 1: Listen for auth state changes — only set session/user, no async work
   useEffect(() => {
@@ -36,9 +37,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!session?.user) {
         setProfile(null);
         setRole(null);
+        lastFetchedUserId.current = null;
         setProfileResolved(true);
-      } else {
-        setProfileResolved(false); // will be resolved by the user effect
+      } else if (session.user.id !== lastFetchedUserId.current) {
+        // Only reset profileResolved for a NEW user
+        setProfileResolved(false);
       }
     });
 
@@ -61,10 +64,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!user) {
       setProfile(null);
       setRole(null);
+      lastFetchedUserId.current = null;
       setProfileResolved(true);
       return;
     }
 
+    // Skip if already fetched for this user
+    if (lastFetchedUserId.current === user.id) return;
     if (fetchingRef.current) return;
     fetchingRef.current = true;
 
@@ -74,6 +80,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ]).then(([profileRes, roleRes]) => {
       if (profileRes.data) setProfile(profileRes.data);
       if (roleRes.data) setRole(roleRes.data.role as AppRole);
+      lastFetchedUserId.current = user.id;
       setProfileResolved(true);
       fetchingRef.current = false;
     }).catch(() => {
