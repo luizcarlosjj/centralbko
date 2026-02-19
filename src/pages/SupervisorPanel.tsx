@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,14 +10,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
-import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, Profile } from '@/types/tickets';
+import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, Profile, PauseLog } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
-import PauseDetailsDialog from '@/components/PauseDetailsDialog';
 import { Link } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
 
-const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, assigned_analyst_id, total_execution_seconds, started_at, created_at, finished_at';
+const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, assigned_analyst_id, total_execution_seconds, total_paused_seconds, started_at, created_at, finished_at, pause_started_at, description';
 const PAGE_SIZE = 20;
 
 const priorityColor: Record<string, string> = {
@@ -45,7 +44,12 @@ const SupervisorPanel = () => {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [page, setPage] = useState(0);
-  const [pauseDetailTicket, setPauseDetailTicket] = useState<Ticket | null>(null);
+
+  // Expanded rows
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [pauseLogs, setPauseLogs] = useState<Record<string, PauseLog[]>>({});
+  const [pauseReasonNames, setPauseReasonNames] = useState<Record<string, string>>({});
+  const [pauseResponses, setPauseResponses] = useState<Record<string, { description_text: string; created_at: string; responded_by: string }[]>>({});
 
   const { data: analysts = [] } = useQuery({
     queryKey: ['supervisor-analysts'],
@@ -80,10 +84,65 @@ const SupervisorPanel = () => {
   const totalCount = ticketData?.count || 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  // Reset page when filters change
   const handleFilterChange = (setter: (v: string) => void) => (value: string) => {
     setter(value);
     setPage(0);
+  };
+
+  const getAnalystName = (id: string | null) => {
+    if (!id) return 'Não atribuído';
+    return analysts.find(a => a.id === id)?.name || id.slice(0, 8);
+  };
+
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const toggleExpand = async (ticketId: string) => {
+    const next = new Set(expandedRows);
+    if (next.has(ticketId)) {
+      next.delete(ticketId);
+    } else {
+      next.add(ticketId);
+      if (!pauseLogs[ticketId]) {
+        const { data } = await supabase
+          .from('pause_logs')
+          .select('id, ticket_id, pause_reason_id, description_text, pause_started_at, pause_ended_at, paused_seconds, created_by')
+          .eq('ticket_id', ticketId)
+          .order('pause_started_at', { ascending: false });
+        if (data) {
+          const logs = data as unknown as PauseLog[];
+          setPauseLogs(prev => ({ ...prev, [ticketId]: logs }));
+          const reasonIds = [...new Set(logs.map(l => l.pause_reason_id))].filter(id => !pauseReasonNames[id]);
+          if (reasonIds.length > 0) {
+            const { data: reasons } = await supabase.from('pause_reasons').select('id, title').in('id', reasonIds);
+            if (reasons) {
+              setPauseReasonNames(prev => ({ ...prev, ...Object.fromEntries(reasons.map(r => [r.id, r.title])) }));
+            }
+          }
+          // Fetch pause responses for this ticket
+          const logIds = logs.map(l => l.id);
+          if (logIds.length > 0) {
+            const { data: responses } = await supabase
+              .from('pause_responses')
+              .select('pause_log_id, description_text, created_at, responded_by')
+              .in('pause_log_id', logIds);
+            if (responses) {
+              const responseMap: Record<string, typeof responses> = {};
+              responses.forEach(r => {
+                if (!responseMap[r.pause_log_id]) responseMap[r.pause_log_id] = [];
+                responseMap[r.pause_log_id].push(r);
+              });
+              setPauseResponses(prev => ({ ...prev, ...responseMap }));
+            }
+          }
+        }
+      }
+    }
+    setExpandedRows(next);
   };
 
   const reopenTicket = async (ticket: Ticket) => {
@@ -98,7 +157,6 @@ const SupervisorPanel = () => {
     queryClient.invalidateQueries({ queryKey: ['supervisor-tickets'] });
   };
 
-  // Realtime subscription for live updates
   useEffect(() => {
     const channel = supabase
       .channel('supervisor-tickets-realtime')
@@ -109,7 +167,6 @@ const SupervisorPanel = () => {
     return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
 
-  // Summary stats from current page (approximate for filtered view)
   const inProgress = tickets.filter(t => t.status === 'em_andamento').length;
   const paused = tickets.filter(t => t.status === 'pausado').length;
   const finished = tickets.filter(t => t.status === 'finalizado').length;
@@ -117,18 +174,6 @@ const SupervisorPanel = () => {
   const avgTime = finishedAll.length > 0
     ? Math.round(finishedAll.reduce((a, t) => a + (t.total_execution_seconds || 0), 0) / finishedAll.length)
     : 0;
-
-  const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const getAnalystName = (id: string | null) => {
-    if (!id) return 'Não atribuído';
-    return analysts.find(a => a.id === id)?.name || id.slice(0, 8);
-  };
 
   return (
     <AppLayout>
@@ -213,7 +258,7 @@ const SupervisorPanel = () => {
                 </Select>
               </div>
               <div>
-                <Label className="text-xs">Analista</Label>
+                <Label className="text-xs">Backoffice</Label>
                 <Select value={filterAnalyst} onValueChange={handleFilterChange(setFilterAnalyst)}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -239,13 +284,14 @@ const SupervisorPanel = () => {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead></TableHead>
                   <TableHead>ID</TableHead>
                   <TableHead>Base</TableHead>
                   <TableHead>Solicitante</TableHead>
                   <TableHead>Prioridade</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Analista</TableHead>
+                  <TableHead>Backoffice</TableHead>
                   <TableHead>Tempo</TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Ações</TableHead>
@@ -253,29 +299,126 @@ const SupervisorPanel = () => {
               </TableHeader>
               <TableBody>
                 {tickets.map(ticket => (
-                  <TableRow key={ticket.id}>
-                    <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
-                    <TableCell>{ticket.base_name}</TableCell>
-                    <TableCell>{ticket.requester_name}</TableCell>
-                    <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
-                    <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
-                    <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
-                    <TableCell className="text-sm">{getAnalystName(ticket.assigned_analyst_id)}</TableCell>
-                    <TableCell><LiveTimer ticket={ticket} /></TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
-                    <TableCell className="space-x-1">
-                      {ticket.status === 'pausado' && (
-                        <Button size="sm" variant="outline" onClick={() => setPauseDetailTicket(ticket)}>
-                          <Eye className="mr-1 h-3 w-3" /> Pausa
-                        </Button>
-                      )}
-                      {ticket.status === 'finalizado' && (
-                        <Button size="sm" variant="outline" onClick={() => reopenTicket(ticket)}>
-                          <RotateCcw className="mr-1 h-3 w-3" /> Reabrir
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
+                  <React.Fragment key={ticket.id}>
+                    <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
+                      <TableCell>
+                        {expandedRows.has(ticket.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
+                      <TableCell>{ticket.base_name}</TableCell>
+                      <TableCell>{ticket.requester_name}</TableCell>
+                      <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                      <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
+                      <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
+                      <TableCell className="text-sm">{getAnalystName(ticket.assigned_analyst_id)}</TableCell>
+                      <TableCell><LiveTimer ticket={ticket} /></TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                      <TableCell onClick={e => e.stopPropagation()}>
+                        {ticket.status === 'finalizado' && (
+                          <Button size="sm" variant="outline" onClick={() => reopenTicket(ticket)}>
+                            <RotateCcw className="mr-1 h-3 w-3" /> Reabrir
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    {expandedRows.has(ticket.id) && (
+                      <TableRow>
+                        <TableCell colSpan={11} className="bg-muted/30 p-4">
+                          {/* Ticket details */}
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-xs">
+                            <div>
+                              <span className="text-muted-foreground">Criação:</span>
+                              <p className="font-medium">{new Date(ticket.created_at).toLocaleString('pt-BR')}</p>
+                            </div>
+                            {ticket.started_at && (
+                              <div>
+                                <span className="text-muted-foreground">Início Execução:</span>
+                                <p className="font-medium">{new Date(ticket.started_at).toLocaleString('pt-BR')}</p>
+                              </div>
+                            )}
+                            {ticket.finished_at && (
+                              <div>
+                                <span className="text-muted-foreground">Finalização:</span>
+                                <p className="font-medium">{new Date(ticket.finished_at).toLocaleString('pt-BR')}</p>
+                              </div>
+                            )}
+                            <div>
+                              <span className="text-muted-foreground">Tempo Execução:</span>
+                              <p className="font-medium font-mono">{formatTime(ticket.total_execution_seconds || 0)}</p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Tempo Pausa:</span>
+                              <p className="font-medium font-mono">{formatTime(ticket.total_paused_seconds || 0)}</p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Tempo Total:</span>
+                              <p className="font-medium font-mono">{formatTime((ticket.total_execution_seconds || 0) + (ticket.total_paused_seconds || 0))}</p>
+                            </div>
+                          </div>
+
+                          {ticket.description && (
+                            <div className="mb-4">
+                              <p className="text-sm font-medium mb-1">Descrição</p>
+                              <p className="text-xs text-muted-foreground bg-background rounded p-2 border">{ticket.description}</p>
+                            </div>
+                          )}
+
+                          <p className="text-sm font-medium mb-2">Histórico de Pausas</p>
+                          {(pauseLogs[ticket.id] || []).length === 0 ? (
+                            <p className="text-xs text-muted-foreground">Nenhuma pausa registrada</p>
+                          ) : (
+                            <div className="space-y-3">
+                              {(pauseLogs[ticket.id] || []).map((log, idx) => (
+                                <div key={log.id} className="text-xs border rounded p-3 bg-background space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-medium text-foreground">Pausa {(pauseLogs[ticket.id] || []).length - idx}</span>
+                                    <span className="text-muted-foreground">
+                                      {log.pause_ended_at ? formatTime(log.paused_seconds) : 'Em andamento'}
+                                    </span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                                    <div>Início: {new Date(log.pause_started_at).toLocaleString('pt-BR')}</div>
+                                    {log.pause_ended_at && <div>Fim: {new Date(log.pause_ended_at).toLocaleString('pt-BR')}</div>}
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Pausado por: </span>
+                                    <span className="font-medium">{getAnalystName(log.created_by)}</span>
+                                  </div>
+                                  {pauseReasonNames[log.pause_reason_id] && (
+                                    <div>
+                                      <span className="text-muted-foreground">Motivo: </span>
+                                      <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 text-xs">{pauseReasonNames[log.pause_reason_id]}</Badge>
+                                    </div>
+                                  )}
+                                  {log.description_text && (
+                                    <div>
+                                      <span className="text-muted-foreground">Descrição (Backoffice):</span>
+                                      <p className="mt-1 bg-muted/30 rounded p-2">{log.description_text}</p>
+                                    </div>
+                                  )}
+                                  {/* Pause responses from analyst */}
+                                  {(pauseResponses[log.id] || []).length > 0 && (
+                                    <div className="border-t border-border pt-2 mt-2">
+                                      <span className="text-muted-foreground font-medium">Resposta do Analista:</span>
+                                      {(pauseResponses[log.id] || []).map((resp, ri) => (
+                                        <div key={ri} className="mt-1 bg-primary/5 rounded p-2">
+                                          <div className="flex justify-between text-muted-foreground">
+                                            <span>Por: {getAnalystName(resp.responded_by)}</span>
+                                            <span>{new Date(resp.created_at).toLocaleString('pt-BR')}</span>
+                                          </div>
+                                          <p className="mt-1">{resp.description_text}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
                 ))}
               </TableBody>
             </Table>
@@ -294,14 +437,6 @@ const SupervisorPanel = () => {
           </CardContent>
         </Card>
       </div>
-
-      {pauseDetailTicket && (
-        <PauseDetailsDialog
-          open={!!pauseDetailTicket}
-          onOpenChange={(open) => { if (!open) setPauseDetailTicket(null); }}
-          ticket={pauseDetailTicket}
-        />
-      )}
     </AppLayout>
   );
 };

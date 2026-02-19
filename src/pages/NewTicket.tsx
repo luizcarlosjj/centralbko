@@ -47,7 +47,7 @@ const NewTicket = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!priority || !type || !user || !profile) return;
+    if (!priority || !type || !user || !profile || !attachment) return;
     setSubmitting(true);
 
     const id = crypto.randomUUID();
@@ -131,7 +131,7 @@ const NewTicket = () => {
                 <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Descreva o chamado..." rows={4} maxLength={5000} />
               </div>
               <div className="space-y-2">
-                <Label>Anexo (opcional)</Label>
+                <Label>Planilha <span className="text-destructive">*</span></Label>
                 {!attachment ? (
                   <div className="flex items-center gap-2 cursor-pointer rounded-lg border-2 border-dashed p-3 border-border bg-muted/30 hover:border-primary/40 transition-colors" onClick={() => fileInputRef.current?.click()}>
                     <Paperclip className="h-4 w-4 text-muted-foreground" />
@@ -149,7 +149,7 @@ const NewTicket = () => {
                 <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" />
                 {fileError && <p className="text-sm text-destructive">{fileError}</p>}
               </div>
-              <Button type="submit" className="w-full" disabled={submitting || !priority || !type}>
+              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || !attachment}>
                 <Send className="mr-2 h-4 w-4" />
                 {submitting ? 'Enviando...' : 'Enviar Chamado'}
               </Button>
