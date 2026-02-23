@@ -17,7 +17,42 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { tickets } = await req.json();
+    const body = await req.json();
+
+    // Handle DELETE action
+    if (body.action === "delete_all") {
+      // Delete status logs first (foreign key)
+      const { error: logsError } = await supabase
+        .from("ticket_status_logs")
+        .delete()
+        .like("old_status", "%");
+      
+      if (logsError) {
+        console.error("Error deleting status logs:", logsError);
+      }
+
+      // Delete all tickets that were imported (have description starting with "Importado")
+      const { data: deleted, error: deleteError } = await supabase
+        .from("tickets")
+        .delete()
+        .like("description", "Importado da planilha%")
+        .select("id");
+
+      if (deleteError) {
+        return new Response(
+          JSON.stringify({ error: "Erro ao excluir: " + deleteError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, deletedCount: deleted?.length || 0 }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Handle IMPORT action
+    const { tickets } = body;
 
     if (!Array.isArray(tickets) || tickets.length === 0) {
       return new Response(
@@ -41,38 +76,59 @@ Deno.serve(async (req) => {
           }
         }
 
-        const ticketData: Record<string, unknown> = {
-          base_name: t.base_name,
-          requester_name: t.requester_name,
-          requester_user_id: null,
-          priority: "media",
-          type: t.type,
-          description: `Importado da planilha - ${t.base_name}`,
-          status: t.status,
-          created_at: t.created_at,
-          assigned_analyst_id: t.assigned_analyst_id || null,
-          total_execution_seconds: totalExecutionSeconds,
-          total_paused_seconds: 0,
-        };
-
-        // Set started_at for tickets that were worked on
-        if (t.status !== "nao_iniciado") {
-          ticketData.started_at = t.created_at;
-        }
-
-        // Set finished_at for completed tickets
-        if (t.status === "finalizado" && t.finished_at) {
-          ticketData.finished_at = t.finished_at;
-        }
-
+        // First INSERT with minimal data (trigger will override some fields)
         const { data: ticket, error: insertError } = await supabase
           .from("tickets")
-          .insert(ticketData)
+          .insert({
+            base_name: t.base_name,
+            requester_name: t.requester_name,
+            requester_user_id: null,
+            priority: "media",
+            type: t.type,
+            description: `Importado da planilha - ${t.base_name}`,
+            status: "nao_iniciado",
+            total_execution_seconds: 0,
+            total_paused_seconds: 0,
+          })
           .select("id")
           .single();
 
         if (insertError) {
           errors.push(`Erro ao inserir "${t.base_name}": ${insertError.message}`);
+          errorCount++;
+          continue;
+        }
+
+        // Now UPDATE to override the trigger's changes with the real data
+        const updateData: Record<string, unknown> = {
+          status: t.status,
+          assigned_analyst_id: t.assigned_analyst_id || null,
+          total_execution_seconds: totalExecutionSeconds,
+          total_paused_seconds: 0,
+          created_at: t.created_at,
+        };
+
+        // Set started_at for tickets that were worked on
+        if (t.status !== "nao_iniciado") {
+          updateData.started_at = t.created_at;
+        } else {
+          updateData.started_at = null;
+        }
+
+        // Set finished_at for completed tickets
+        if (t.status === "finalizado" && t.finished_at) {
+          updateData.finished_at = t.finished_at;
+        } else {
+          updateData.finished_at = null;
+        }
+
+        const { error: updateError } = await supabase
+          .from("tickets")
+          .update(updateData)
+          .eq("id", ticket.id);
+
+        if (updateError) {
+          errors.push(`Erro ao atualizar "${t.base_name}": ${updateError.message}`);
           errorCount++;
           continue;
         }
