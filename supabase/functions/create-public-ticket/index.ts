@@ -44,13 +44,42 @@ Deno.serve(async (req) => {
 
     const ticketId = crypto.randomUUID();
     const uploadedUrls: string[] = [];
+    const ALLOWED_EXTS = ['xlsx', 'xls', 'csv', 'pdf', 'zip'];
+    const DANGEROUS_EXTS = ['exe', 'bat', 'cmd', 'msi', 'scr', 'pif', 'com', 'vbs', 'js', 'ws', 'wsf', 'ps1', 'sh'];
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
     // Handle multiple file uploads
     if (attachments && Array.isArray(attachments)) {
       for (const file of attachments) {
         if (!file.base64 || !file.name) continue;
         
-        const ext = file.name.split(".").pop()?.toLowerCase();
+        const ext = file.name.split(".").pop()?.toLowerCase() || '';
+        
+        // Security: validate extension
+        if (!ALLOWED_EXTS.includes(ext)) {
+          return new Response(
+            JSON.stringify({ error: `Extensão não permitida: .${ext}` }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        
+        // Security: check for dangerous patterns in filename
+        const nameLower = file.name.toLowerCase();
+        if (DANGEROUS_EXTS.some((d: string) => nameLower.includes('.' + d))) {
+          return new Response(
+            JSON.stringify({ error: `Arquivo bloqueado por segurança: ${file.name}` }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        
+        // Security: validate file size from base64
+        const fileSize = (file.base64.length * 3) / 4;
+        if (fileSize > MAX_FILE_SIZE) {
+          return new Response(
+            JSON.stringify({ error: `Arquivo muito grande: ${file.name}. Máximo: 10MB` }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
         const filePath = `public/${ticketId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
         const binaryStr = atob(file.base64);
