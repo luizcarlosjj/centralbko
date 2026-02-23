@@ -2,3 +2,6 @@ project_id = "bmoytmvsnemiakiahxzv"
 
 [functions.create-public-ticket]
 verify_jwt = false
+
+[functions.bulk-import-tickets]
+verify_jwt = false

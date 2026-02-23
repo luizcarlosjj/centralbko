@@ -17,6 +17,7 @@ const PauseReasons = React.lazy(() => import("@/pages/PauseReasons"));
 const NewTicket = React.lazy(() => import("@/pages/NewTicket"));
 const PublicTicketForm = React.lazy(() => import("@/pages/PublicTicketForm"));
 const RequesterManagement = React.lazy(() => import("@/pages/RequesterManagement"));
+const BulkImport = React.lazy(() => import("@/pages/BulkImport"));
 
 const queryClient = new QueryClient();
 
@@ -75,6 +76,13 @@ const App = () => (
                 <ProtectedRoute allowedRoles={['supervisor']}>
                   <Suspense fallback={<PageLoader />}>
                     <RequesterManagement />
+                  </Suspense>
+                </ProtectedRoute>
+              } />
+              <Route path="/bulk-import" element={
+                <ProtectedRoute allowedRoles={['supervisor']}>
+                  <Suspense fallback={<PageLoader />}>
+                    <BulkImport />
                   </Suspense>
                 </ProtectedRoute>
               } />
