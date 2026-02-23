@@ -18,9 +18,8 @@ Deno.serve(async (req) => {
     );
 
     const body = await req.json();
-    const { base_name, requester_name, priority, type, description } = body;
+    const { base_name, requester_name, priority, type, description, attachments } = body;
 
-    // Validate required fields
     if (!base_name || !requester_name || !priority || !type || !description) {
       return new Response(
         JSON.stringify({ error: "Todos os campos obrigatórios devem ser preenchidos." }),
@@ -43,79 +42,76 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Handle file upload if provided
-    let attachment_url: string | null = null;
+    const ticketId = crypto.randomUUID();
+    const uploadedUrls: string[] = [];
+
+    // Handle multiple file uploads
+    if (attachments && Array.isArray(attachments)) {
+      for (const file of attachments) {
+        if (!file.base64 || !file.name) continue;
+        
+        const ext = file.name.split(".").pop()?.toLowerCase();
+        const filePath = `public/${ticketId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+        const binaryStr = atob(file.base64);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+
+        const { error: uploadError } = await supabase.storage
+          .from("ticket-attachments")
+          .upload(filePath, bytes.buffer, {
+            contentType: file.content_type || "application/octet-stream",
+          });
+
+        if (uploadError) {
+          return new Response(
+            JSON.stringify({ error: "Erro ao enviar arquivo: " + uploadError.message }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const { data: urlData } = supabase.storage
+          .from("ticket-attachments")
+          .getPublicUrl(filePath);
+        uploadedUrls.push(urlData.publicUrl);
+      }
+    }
+
+    // Also support legacy single file format
     if (body.attachment_base64 && body.attachment_name) {
-      const ticketId = crypto.randomUUID();
       const ext = body.attachment_name.split(".").pop()?.toLowerCase();
       const filePath = `public/${ticketId}/${Date.now()}.${ext}`;
-
-      // Decode base64
       const binaryStr = atob(body.attachment_base64);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) {
         bytes[i] = binaryStr.charCodeAt(i);
       }
-
       const { error: uploadError } = await supabase.storage
         .from("ticket-attachments")
         .upload(filePath, bytes.buffer, {
           contentType: body.attachment_content_type || "application/octet-stream",
         });
-
-      if (uploadError) {
-        return new Response(
-          JSON.stringify({ error: "Erro ao enviar arquivo: " + uploadError.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage.from("ticket-attachments").getPublicUrl(filePath);
+        uploadedUrls.push(urlData.publicUrl);
       }
-
-      const { data: urlData } = supabase.storage
-        .from("ticket-attachments")
-        .getPublicUrl(filePath);
-      attachment_url = urlData.publicUrl;
-
-      // Insert ticket with the generated ID
-      const { data: ticket, error: insertError } = await supabase
-        .from("tickets")
-        .insert({
-          id: ticketId,
-          base_name,
-          requester_name,
-          requester_user_id: null,
-          priority,
-          type,
-          description,
-          attachment_url,
-          status: "nao_iniciado",
-        })
-        .select("id")
-        .single();
-
-      if (insertError) {
-        return new Response(
-          JSON.stringify({ error: "Erro ao criar chamado: " + insertError.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, ticket_id: ticket.id }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
     }
 
-    // Insert without attachment
+    const attachment_url = uploadedUrls.length > 0 ? JSON.stringify(uploadedUrls) : null;
+
     const { data: ticket, error: insertError } = await supabase
       .from("tickets")
       .insert({
+        id: ticketId,
         base_name,
         requester_name,
         requester_user_id: null,
         priority,
         type,
         description,
-        attachment_url: null,
+        attachment_url,
         status: "nao_iniciado",
       })
       .select("id")

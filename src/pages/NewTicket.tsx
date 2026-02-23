@@ -9,13 +9,14 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Send, Paperclip, X, FileSpreadsheet } from 'lucide-react';
+import { Send, Paperclip, X, FileSpreadsheet, Plus } from 'lucide-react';
 import { PRIORITY_LABELS, TYPE_LABELS, type TicketPriority, type TicketType } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
 
 const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
 const MAX_FILE_SIZE_MB = 5;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const MAX_FILES = 10;
 
 const NewTicket = () => {
   const { user, profile } = useAuth();
@@ -25,48 +26,67 @@ const NewTicket = () => {
   const [type, setType] = useState<TicketType | ''>('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
   const [fileError, setFileError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFileError('');
-    const file = e.target.files?.[0];
-    if (!file) { setAttachment(null); return; }
-    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      setFileError(`Formato não permitido. Use: ${ALLOWED_EXTENSIONS.join(', ')}`);
-      return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    for (const file of files) {
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        setFileError(`Formato não permitido: ${file.name}. Use: ${ALLOWED_EXTENSIONS.join(', ')}`);
+        return;
+      }
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        setFileError(`Arquivo muito grande: ${file.name}. Máximo: ${MAX_FILE_SIZE_MB}MB`);
+        return;
+      }
     }
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      setFileError(`Arquivo muito grande. Máximo: ${MAX_FILE_SIZE_MB}MB`);
-      return;
-    }
-    setAttachment(file);
+
+    setAttachments(prev => {
+      const combined = [...prev, ...files];
+      if (combined.length > MAX_FILES) {
+        setFileError(`Máximo de ${MAX_FILES} arquivos permitidos.`);
+        return prev;
+      }
+      return combined;
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeFile = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+    setFileError('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!priority || !type || !user || !profile || !attachment) return;
+    if (!priority || !type || !user || !profile || attachments.length === 0) return;
     setSubmitting(true);
 
     const id = crypto.randomUUID();
-    let attachmentUrl: string | null = null;
+    const uploadedUrls: string[] = [];
 
-    if (attachment) {
-      const ext = attachment.name.split('.').pop()?.toLowerCase();
-      const filePath = `${id}/${Date.now()}.${ext}`;
+    for (const file of attachments) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      const filePath = `${id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from('ticket-attachments')
-        .upload(filePath, attachment, { contentType: attachment.type });
+        .upload(filePath, file, { contentType: file.type });
       if (uploadError) {
         setSubmitting(false);
-        setFileError('Erro ao enviar arquivo.');
+        setFileError(`Erro ao enviar ${file.name}.`);
         return;
       }
       const { data: urlData } = supabase.storage.from('ticket-attachments').getPublicUrl(filePath);
-      attachmentUrl = urlData.publicUrl;
+      uploadedUrls.push(urlData.publicUrl);
     }
+
+    const attachmentUrl = JSON.stringify(uploadedUrls);
 
     const { error } = await supabase.from('tickets').insert({
       id,
@@ -131,25 +151,43 @@ const NewTicket = () => {
                 <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Descreva o chamado..." rows={4} maxLength={5000} />
               </div>
               <div className="space-y-2">
-                <Label>Planilha <span className="text-destructive">*</span></Label>
-                {!attachment ? (
-                  <div className="flex items-center gap-2 cursor-pointer rounded-lg border-2 border-dashed p-3 border-border bg-muted/30 hover:border-primary/40 transition-colors" onClick={() => fileInputRef.current?.click()}>
-                    <Paperclip className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Planilha (.xlsx, .xls, .csv) — máx {MAX_FILE_SIZE_MB}MB</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 rounded-lg border p-3 border-border">
-                    <FileSpreadsheet className="h-4 w-4 text-primary shrink-0" />
-                    <span className="text-sm truncate flex-1">{attachment.name}</span>
-                    <button type="button" onClick={() => { setAttachment(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}>
-                      <X className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                    </button>
+                <Label>Planilhas <span className="text-destructive">*</span></Label>
+                {attachments.length > 0 && (
+                  <div className="space-y-2">
+                    {attachments.map((file, i) => (
+                      <div key={i} className="flex items-center gap-2 rounded-lg border p-2 border-border">
+                        <FileSpreadsheet className="h-4 w-4 text-primary shrink-0" />
+                        <span className="text-sm truncate flex-1">{file.name}</span>
+                        <span className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)}KB</span>
+                        <button type="button" onClick={() => removeFile(i)}>
+                          <X className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" />
+                {attachments.length < MAX_FILES && (
+                  <div
+                    className="flex items-center gap-2 cursor-pointer rounded-lg border-2 border-dashed p-3 border-border bg-muted/30 hover:border-primary/40 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {attachments.length === 0 ? (
+                      <Paperclip className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <Plus className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <span className="text-sm text-muted-foreground">
+                      {attachments.length === 0
+                        ? `Planilha (.xlsx, .xls, .csv) — máx ${MAX_FILE_SIZE_MB}MB cada`
+                        : 'Adicionar mais arquivos'}
+                    </span>
+                  </div>
+                )}
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" multiple />
                 {fileError && <p className="text-sm text-destructive">{fileError}</p>}
+                <p className="text-xs text-muted-foreground">{attachments.length}/{MAX_FILES} arquivos</p>
               </div>
-              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || !attachment}>
+              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || attachments.length === 0}>
                 <Send className="mr-2 h-4 w-4" />
                 {submitting ? 'Enviando...' : 'Enviar Chamado'}
               </Button>
