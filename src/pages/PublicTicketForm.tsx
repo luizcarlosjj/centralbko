@@ -8,12 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Send, Paperclip, X, FileSpreadsheet, ArrowLeft, Headphones, Plus } from 'lucide-react';
+import { Send, Paperclip, X, FileSpreadsheet, ArrowLeft, Headphones, Plus, FileText, FileArchive, File } from 'lucide-react';
 import { PRIORITY_LABELS, TYPE_LABELS, type TicketPriority, type TicketType } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
 
-const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
-const MAX_FILE_SIZE_MB = 5;
+const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.pdf', '.zip'];
+const DANGEROUS_ZIP_EXTENSIONS = ['.exe', '.bat', '.cmd', '.msi', '.scr', '.pif', '.com', '.vbs', '.js', '.ws', '.wsf', '.ps1', '.sh'];
+const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const MAX_FILES = 10;
 
@@ -50,6 +51,25 @@ const PublicTicketForm = () => {
       }
       if (file.size > MAX_FILE_SIZE_BYTES) {
         setFileError(`Arquivo muito grande: ${file.name}. Máximo: ${MAX_FILE_SIZE_MB}MB`);
+        return;
+      }
+      // Security: check for dangerous file name patterns
+      const nameLower = file.name.toLowerCase();
+      if (DANGEROUS_ZIP_EXTENSIONS.some(d => nameLower.includes(d))) {
+        setFileError(`Arquivo bloqueado por segurança: ${file.name}`);
+        return;
+      }
+      // Security: validate MIME type consistency
+      const validMimes: Record<string, string[]> = {
+        '.xlsx': ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+        '.xls': ['application/vnd.ms-excel'],
+        '.csv': ['text/csv', 'application/vnd.ms-excel', 'text/plain'],
+        '.pdf': ['application/pdf'],
+        '.zip': ['application/zip', 'application/x-zip-compressed', 'application/x-zip'],
+      };
+      const expectedMimes = validMimes[ext] || [];
+      if (file.type && expectedMimes.length > 0 && !expectedMimes.includes(file.type)) {
+        setFileError(`Tipo de arquivo suspeito: ${file.name}. O conteúdo não corresponde à extensão.`);
         return;
       }
     }
@@ -176,12 +196,14 @@ const PublicTicketForm = () => {
                 <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Descreva o chamado..." rows={4} maxLength={5000} />
               </div>
               <div className="space-y-2">
-                <Label>Planilhas <span className="text-destructive">*</span></Label>
+                <Label>Anexos <span className="text-destructive">*</span></Label>
                 {attachments.length > 0 && (
                   <div className="space-y-2">
                     {attachments.map((file, i) => (
-                      <div key={i} className="flex items-center gap-2 rounded-lg border p-2 border-border">
-                        <FileSpreadsheet className="h-4 w-4 text-primary shrink-0" />
+                  <div key={i} className="flex items-center gap-2 rounded-lg border p-2 border-border">
+                        {file.name.endsWith('.pdf') ? <FileText className="h-4 w-4 text-destructive shrink-0" /> :
+                         file.name.endsWith('.zip') ? <FileArchive className="h-4 w-4 text-amber-500 shrink-0" /> :
+                         <FileSpreadsheet className="h-4 w-4 text-primary shrink-0" />}
                         <span className="text-sm truncate flex-1">{file.name}</span>
                         <span className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)}KB</span>
                         <button type="button" onClick={() => removeFile(i)}>
@@ -203,12 +225,12 @@ const PublicTicketForm = () => {
                     )}
                     <span className="text-sm text-muted-foreground">
                       {attachments.length === 0
-                        ? `Planilha (.xlsx, .xls, .csv) — máx ${MAX_FILE_SIZE_MB}MB cada`
+                        ? `Arquivos (.xlsx, .xls, .csv, .pdf, .zip) — máx ${MAX_FILE_SIZE_MB}MB cada`
                         : 'Adicionar mais arquivos'}
                     </span>
                   </div>
                 )}
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" multiple />
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf,.zip" onChange={handleFileChange} className="hidden" multiple />
                 {fileError && <p className="text-sm text-destructive">{fileError}</p>}
                 <p className="text-xs text-muted-foreground">{attachments.length}/{MAX_FILES} arquivos</p>
               </div>
