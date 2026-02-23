@@ -28,16 +28,22 @@ Deno.serve(async (req) => {
     }
 
     const validPriorities = ["baixa", "media", "alta", "urgente"];
-    const validTypes = ["setup_questionario", "cliente", "ajuste", "outro"];
     if (!validPriorities.includes(priority)) {
       return new Response(
         JSON.stringify({ error: "Prioridade inválida." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    if (!validTypes.includes(type)) {
+
+    // Validate type against database
+    const { data: validTypes } = await supabase
+      .from("ticket_types")
+      .select("value")
+      .eq("active", true);
+    const typeValues = (validTypes || []).map((t: any) => t.value);
+    if (!typeValues.includes(type)) {
       return new Response(
-        JSON.stringify({ error: "Tipo inválido." }),
+        JSON.stringify({ error: "Tipo de solicitação inválido." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

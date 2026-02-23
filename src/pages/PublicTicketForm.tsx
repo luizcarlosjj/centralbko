@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Send, Paperclip, X, FileSpreadsheet, ArrowLeft, Headphones, Plus, FileText, FileArchive, File } from 'lucide-react';
-import { PRIORITY_LABELS, TYPE_LABELS, type TicketPriority, type TicketType } from '@/types/tickets';
+import { PRIORITY_LABELS, type TicketPriority } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
 
 const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.pdf', '.zip'];
@@ -23,7 +23,7 @@ const PublicTicketForm = () => {
   const [baseName, setBaseName] = useState('');
   const [requesterName, setRequesterName] = useState('');
   const [priority, setPriority] = useState<TicketPriority | ''>('');
-  const [type, setType] = useState<TicketType | ''>('');
+  const [type, setType] = useState('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -35,6 +35,14 @@ const PublicTicketForm = () => {
     queryFn: async () => {
       const { data } = await supabase.from('requesters').select('id, name').eq('active', true).order('name');
       return (data || []) as { id: string; name: string }[];
+    },
+  });
+
+  const { data: ticketTypes = [] } = useQuery({
+    queryKey: ['public-ticket-types'],
+    queryFn: async () => {
+      const { data } = await supabase.from('ticket_types').select('id, value, label').eq('active', true).order('label');
+      return (data || []) as { id: string; value: string; label: string }[];
     },
   });
 
@@ -183,12 +191,15 @@ const PublicTicketForm = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Tipo <span className="text-destructive">*</span></Label>
-                  <Select value={type} onValueChange={v => setType(v as TicketType)}>
+                  <Select value={type} onValueChange={setType}>
                     <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                     <SelectContent>
-                      {Object.entries(TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                      {ticketTypes.map(t => <SelectItem key={t.id} value={t.value}>{t.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  {ticketTypes.length === 0 && (
+                    <p className="text-xs text-muted-foreground">Nenhum tipo cadastrado. Peça ao supervisor para cadastrar.</p>
+                  )}
                 </div>
               </div>
               <div className="space-y-2">
