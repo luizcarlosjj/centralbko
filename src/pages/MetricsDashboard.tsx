@@ -1,12 +1,13 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
 import { Ticket, PRIORITY_LABELS, TYPE_LABELS, Profile, UserRole } from '@/types/tickets';
-import { ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, Users } from 'lucide-react';
+import { ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, Users, TrendingUp, Calendar } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const COLORS = ['hsl(270, 67%, 45%)', 'hsl(258, 68%, 74%)', 'hsl(142, 71%, 45%)', 'hsl(38, 92%, 50%)', 'hsl(0, 84%, 60%)'];
 const TICKET_COLUMNS = 'id, status, priority, type, assigned_analyst_id, requester_user_id, total_execution_seconds, total_paused_seconds, created_at, finished_at';
@@ -45,9 +46,6 @@ const MetricsDashboard = () => {
   const { data: userRoles = [] } = useQuery({
     queryKey: ['metrics-user-roles'],
     queryFn: async () => {
-      // Supervisors can read all roles via has_role function, but user_roles RLS only allows own role.
-      // We'll use the manage-users edge function or fall back to treating all profiles with assigned tickets as backoffice
-      // and all with requester tickets as analysts. This is a practical heuristic.
       const { data } = await supabase.from('user_roles').select('user_id, role');
       return (data || []) as Pick<UserRole, 'user_id' | 'role'>[];
     },
@@ -66,6 +64,9 @@ const MetricsDashboard = () => {
     ? Math.round(finishedTickets.reduce((a, t) => a + (t.total_paused_seconds || 0), 0) / finished)
     : 0;
 
+  // Taxa de conclusão: (finalizados + pausados) / total recebidos
+  const conclusionRate = total > 0 ? (((finished + paused) / total) * 100).toFixed(1) : '0.0';
+
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -75,11 +76,10 @@ const MetricsDashboard = () => {
 
   const getProfileName = (id: string) => profiles.find(p => p.id === id)?.name || id.slice(0, 8);
 
-  // Separate analysts and backoffice users
+  // Rankings
   const backofficeUserIds = new Set(userRoles.filter(r => r.role === 'backoffice').map(r => r.user_id));
   const analystUserIds = new Set(userRoles.filter(r => r.role === 'analyst').map(r => r.user_id));
 
-  // Backoffice ranking (by assigned tickets)
   const backofficeRanking = profiles
     .filter(p => backofficeUserIds.has(p.id))
     .map(p => {
@@ -105,7 +105,6 @@ const MetricsDashboard = () => {
     })
     .sort((a, b) => b.finalizados - a.finalizados);
 
-  // Analyst ranking (by requester)
   const analystRanking = profiles
     .filter(p => analystUserIds.has(p.id))
     .map(p => {
@@ -140,16 +139,88 @@ const MetricsDashboard = () => {
     tempoMedio: b.tempoMedio,
   }));
 
+  // --- Daily conclusion data (last 30 days) ---
+  const now = new Date();
   const last30 = new Date();
   last30.setDate(last30.getDate() - 30);
-  const dailyMap = new Map<string, number>();
+
+  const dailyCreatedMap = new Map<string, number>();
+  const dailyFinishedMap = new Map<string, number>();
+
   tickets
     .filter(t => new Date(t.created_at) >= last30)
     .forEach(t => {
       const day = new Date(t.created_at).toLocaleDateString('pt-BR');
-      dailyMap.set(day, (dailyMap.get(day) || 0) + 1);
+      dailyCreatedMap.set(day, (dailyCreatedMap.get(day) || 0) + 1);
     });
-  const timeline = Array.from(dailyMap.entries()).map(([date, count]) => ({ date, chamados: count })).reverse();
+
+  finishedTickets
+    .filter(t => t.finished_at && new Date(t.finished_at) >= last30)
+    .forEach(t => {
+      const day = new Date(t.finished_at!).toLocaleDateString('pt-BR');
+      dailyFinishedMap.set(day, (dailyFinishedMap.get(day) || 0) + 1);
+    });
+
+  // Merge keys for a combined daily view
+  const allDays = new Set([...dailyCreatedMap.keys(), ...dailyFinishedMap.keys()]);
+  const dailyCombined = Array.from(allDays)
+    .map(date => ({
+      date,
+      sortKey: date.split('/').reverse().join('-'),
+      recebidos: dailyCreatedMap.get(date) || 0,
+      concluidos: dailyFinishedMap.get(date) || 0,
+    }))
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+  // --- Weekly view ---
+  const getWeekLabel = (d: Date): string => {
+    const startOfWeek = new Date(d);
+    const dayOfWeek = startOfWeek.getDay();
+    startOfWeek.setDate(startOfWeek.getDate() - dayOfWeek);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(endOfWeek.getDate() + 6);
+    return `${startOfWeek.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} - ${endOfWeek.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
+  };
+
+  const getWeekSortKey = (d: Date): string => {
+    const startOfWeek = new Date(d);
+    const dayOfWeek = startOfWeek.getDay();
+    startOfWeek.setDate(startOfWeek.getDate() - dayOfWeek);
+    return startOfWeek.toISOString().slice(0, 10);
+  };
+
+  const weeklyCreatedMap = new Map<string, { label: string; recebidos: number; concluidos: number }>();
+
+  tickets
+    .filter(t => new Date(t.created_at) >= last30)
+    .forEach(t => {
+      const d = new Date(t.created_at);
+      const key = getWeekSortKey(d);
+      const label = getWeekLabel(d);
+      const existing = weeklyCreatedMap.get(key) || { label, recebidos: 0, concluidos: 0 };
+      existing.recebidos++;
+      weeklyCreatedMap.set(key, existing);
+    });
+
+  finishedTickets
+    .filter(t => t.finished_at && new Date(t.finished_at) >= last30)
+    .forEach(t => {
+      const d = new Date(t.finished_at!);
+      const key = getWeekSortKey(d);
+      const label = getWeekLabel(d);
+      const existing = weeklyCreatedMap.get(key) || { label, recebidos: 0, concluidos: 0 };
+      existing.concluidos++;
+      weeklyCreatedMap.set(key, existing);
+    });
+
+  const weeklyData = Array.from(weeklyCreatedMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, v]) => ({
+      semana: v.label,
+      recebidos: v.recebidos,
+      concluidos: v.concluidos,
+      taxa: v.recebidos > 0 ? Math.round((v.concluidos / v.recebidos) * 100) : 0,
+    }));
 
   return (
     <AppLayout>
@@ -223,8 +294,8 @@ const MetricsDashboard = () => {
           </Card>
         </div>
 
-        {/* Summary cards */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        {/* Summary cards - now with 7 cards including conclusion rate */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-xs font-medium text-muted-foreground">Total</CardTitle>
@@ -255,6 +326,13 @@ const MetricsDashboard = () => {
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Taxa Conclusão</CardTitle>
+              <TrendingUp className="h-4 w-4 text-success" />
+            </CardHeader>
+            <CardContent><p className="text-2xl font-bold text-success">{conclusionRate}%</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-xs font-medium text-muted-foreground">Exec. Média</CardTitle>
               <Clock className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
@@ -268,6 +346,96 @@ const MetricsDashboard = () => {
             <CardContent><p className="text-2xl font-bold">{formatTime(avgPausedTime)}</p></CardContent>
           </Card>
         </div>
+
+        {/* Conclusion per day + Weekly view with tabs */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-primary" />
+              Recebidos vs Concluídos
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue="daily" className="w-full">
+              <TabsList className="mb-4">
+                <TabsTrigger value="daily">Por Dia</TabsTrigger>
+                <TabsTrigger value="weekly">Por Semana</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="daily">
+                {dailyCombined.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">Sem dados nos últimos 30 dias</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={dailyCombined}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={60} />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="recebidos" fill="hsl(270, 67%, 45%)" name="Recebidos" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="concluidos" fill="hsl(142, 71%, 45%)" name="Concluídos" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </TabsContent>
+
+              <TabsContent value="weekly">
+                {weeklyData.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">Sem dados nos últimos 30 dias</p>
+                ) : (
+                  <div className="space-y-4">
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={weeklyData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="semana" tick={{ fontSize: 10 }} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip
+                          formatter={(value: number, name: string) => {
+                            if (name === 'Taxa (%)') return `${value}%`;
+                            return value;
+                          }}
+                        />
+                        <Legend />
+                        <Bar dataKey="recebidos" fill="hsl(270, 67%, 45%)" name="Recebidos" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="concluidos" fill="hsl(142, 71%, 45%)" name="Concluídos" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="taxa" fill="hsl(38, 92%, 50%)" name="Taxa (%)" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+
+                    {/* Weekly summary table */}
+                    <div className="overflow-x-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted">
+                          <tr>
+                            <th className="text-left p-2 font-medium">Semana</th>
+                            <th className="text-center p-2 font-medium">Recebidos</th>
+                            <th className="text-center p-2 font-medium">Concluídos</th>
+                            <th className="text-center p-2 font-medium">Taxa</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {weeklyData.map((w, i) => (
+                            <tr key={i} className="border-t">
+                              <td className="p-2">{w.semana}</td>
+                              <td className="p-2 text-center">{w.recebidos}</td>
+                              <td className="p-2 text-center text-success font-medium">{w.concluidos}</td>
+                              <td className="p-2 text-center">
+                                <Badge variant="outline" className={w.taxa >= 80 ? 'bg-success/10 text-success border-success/20' : w.taxa >= 50 ? 'bg-warning/10 text-warning border-warning/20' : 'bg-destructive/10 text-destructive border-destructive/20'}>
+                                  {w.taxa}%
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
 
         {/* Charts */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -321,12 +489,14 @@ const MetricsDashboard = () => {
             <CardHeader><CardTitle className="text-lg">Evolução por Período</CardTitle></CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={250}>
-                <LineChart data={timeline}>
+                <LineChart data={dailyCombined}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                   <YAxis allowDecimals={false} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="chamados" stroke="hsl(270, 67%, 45%)" strokeWidth={2} dot={{ r: 3 }} />
+                  <Legend />
+                  <Line type="monotone" dataKey="recebidos" stroke="hsl(270, 67%, 45%)" strokeWidth={2} dot={{ r: 3 }} name="Recebidos" />
+                  <Line type="monotone" dataKey="concluidos" stroke="hsl(142, 71%, 45%)" strokeWidth={2} dot={{ r: 3 }} name="Concluídos" />
                 </LineChart>
               </ResponsiveContainer>
             </CardContent>
