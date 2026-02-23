@@ -15,6 +15,8 @@ const MetricsDashboard = React.lazy(() => import("@/pages/MetricsDashboard"));
 const UserManagement = React.lazy(() => import("@/pages/UserManagement"));
 const PauseReasons = React.lazy(() => import("@/pages/PauseReasons"));
 const NewTicket = React.lazy(() => import("@/pages/NewTicket"));
+const PublicTicketForm = React.lazy(() => import("@/pages/PublicTicketForm"));
+const RequesterManagement = React.lazy(() => import("@/pages/RequesterManagement"));
 
 const queryClient = new QueryClient();
 
@@ -35,6 +37,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<Navigate to="/login" replace />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/public-ticket" element={<Suspense fallback={<PageLoader />}><PublicTicketForm /></Suspense>} />
               <Route path="/dashboard" element={
                 <ProtectedRoute>
                   <Dashboard />
@@ -65,6 +68,13 @@ const App = () => (
                 <ProtectedRoute allowedRoles={['supervisor']}>
                   <Suspense fallback={<PageLoader />}>
                     <PauseReasons />
+                  </Suspense>
+                </ProtectedRoute>
+              } />
+              <Route path="/requesters" element={
+                <ProtectedRoute allowedRoles={['supervisor']}>
+                  <Suspense fallback={<PageLoader />}>
+                    <RequesterManagement />
                   </Suspense>
                 </ProtectedRoute>
               } />

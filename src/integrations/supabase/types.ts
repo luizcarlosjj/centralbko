@@ -241,6 +241,30 @@ export type Database = {
         }
         Relationships: []
       }
+      requesters: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by: string
+          id?: string
+          name: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
       ticket_status_logs: {
         Row: {
           changed_at: string
