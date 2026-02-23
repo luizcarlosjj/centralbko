@@ -4,9 +4,20 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Upload, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 const ANDRE_ID = "2b9383d5-fc10-4d2e-9e38-1a9e88be1181";
 
@@ -170,6 +181,7 @@ const RAW_DATA: RawRecord[] = [
 
 const BulkImport: React.FC = () => {
   const [importing, setImporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [imported, setImported] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<{ successCount: number; errorCount: number; errors: string[] } | null>(null);
@@ -186,6 +198,31 @@ const BulkImport: React.FC = () => {
     assigned_analyst_id: r.assigned ? ANDRE_ID : null,
   }));
 
+  const handleDeleteAll = async () => {
+    setDeleting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('bulk-import-tickets', {
+        body: { action: "delete_all" },
+      });
+
+      if (error) {
+        toast({ title: "Erro ao excluir", description: error.message, variant: "destructive" });
+        return;
+      }
+
+      toast({
+        title: "Registros excluídos",
+        description: `${data.deletedCount} tickets importados foram removidos.`,
+      });
+      setImported(false);
+      setResult(null);
+    } catch (err) {
+      toast({ title: "Erro", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleImport = async () => {
     if (imported) {
       toast({ title: "Importação já realizada", description: "Os dados já foram importados.", variant: "destructive" });
@@ -196,7 +233,6 @@ const BulkImport: React.FC = () => {
     setProgress(10);
 
     try {
-      // Split into batches of 20
       const batchSize = 20;
       const batches = [];
       for (let i = 0; i < processedData.length; i += batchSize) {
@@ -335,15 +371,42 @@ const BulkImport: React.FC = () => {
           </Card>
         )}
 
-        <Button
-          onClick={handleImport}
-          disabled={importing || imported}
-          className="w-full"
-          size="lg"
-        >
-          <Upload className="h-4 w-4 mr-2" />
-          {imported ? 'Importação Concluída' : importing ? 'Importando...' : `Importar ${RAW_DATA.length} Registros`}
-        </Button>
+        <div className="flex gap-3">
+          <Button
+            onClick={handleImport}
+            disabled={importing || imported || deleting}
+            className="flex-1"
+            size="lg"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            {imported ? 'Importação Concluída' : importing ? 'Importando...' : `Importar ${RAW_DATA.length} Registros`}
+          </Button>
+
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="destructive"
+                size="lg"
+                disabled={importing || deleting}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {deleting ? 'Excluindo...' : 'Excluir Todos'}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Excluir todos os registros importados?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Esta ação irá remover todos os tickets que foram importados da planilha (descrição "Importado da planilha"). Esta ação não pode ser desfeita.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteAll}>Excluir Todos</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </div>
     </AppLayout>
   );
