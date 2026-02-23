@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import AppLayout from '@/components/AppLayout';
@@ -10,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Send, Paperclip, X, FileSpreadsheet, Plus } from 'lucide-react';
-import { PRIORITY_LABELS, TYPE_LABELS, type TicketPriority, type TicketType } from '@/types/tickets';
+import { PRIORITY_LABELS, type TicketPriority } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
 
 const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
@@ -23,12 +24,21 @@ const NewTicket = () => {
   const navigate = useNavigate();
   const [baseName, setBaseName] = useState('');
   const [priority, setPriority] = useState<TicketPriority | ''>('');
-  const [type, setType] = useState<TicketType | ''>('');
+  const [type, setType] = useState('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [fileError, setFileError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: ticketTypes = [] } = useQuery({
+    queryKey: ['new-ticket-types'],
+    queryFn: async () => {
+      const { data } = await supabase.from('ticket_types').select('value, label').eq('active', true).order('label');
+      return (data || []) as { value: string; label: string }[];
+    },
+    staleTime: 120_000,
+  });
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFileError('');
@@ -138,10 +148,10 @@ const NewTicket = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Tipo</Label>
-                  <Select value={type} onValueChange={v => setType(v as TicketType)}>
+                  <Select value={type} onValueChange={setType}>
                     <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                     <SelectContent>
-                      {Object.entries(TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                      {ticketTypes.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
