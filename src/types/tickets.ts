@@ -1,6 +1,6 @@
 export type TicketPriority = 'baixa' | 'media' | 'alta' | 'urgente';
 export type TicketType = 'setup_questionario' | 'cliente' | 'ajuste' | 'outro';
-export type TicketStatus = 'em_andamento' | 'pausado' | 'finalizado';
+export type TicketStatus = 'nao_iniciado' | 'em_andamento' | 'pausado' | 'finalizado';
 
 export interface Ticket {
   id: string;
@@ -105,6 +105,7 @@ export const TYPE_LABELS: Record<TicketType, string> = {
 };
 
 export const STATUS_LABELS: Record<TicketStatus, string> = {
+  nao_iniciado: 'Não Iniciado',
   em_andamento: 'Em Andamento',
   pausado: 'Pausado',
   finalizado: 'Finalizado',

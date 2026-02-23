@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Play } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, Profile, PauseLog } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
 import { Link } from 'react-router-dom';
@@ -154,6 +154,43 @@ const SupervisorPanel = () => {
       ticket_id: ticket.id, changed_by: user.id, old_status: 'finalizado', new_status: 'em_andamento',
     });
     toast({ title: 'Chamado reaberto' });
+    queryClient.invalidateQueries({ queryKey: ['supervisor-tickets'] });
+  };
+
+  const resumeTicket = async (ticket: Ticket) => {
+    if (!user) return;
+    // Find active pause log
+    const { data: activeLogs } = await supabase
+      .from('pause_logs')
+      .select('id, pause_started_at, paused_seconds')
+      .eq('ticket_id', ticket.id)
+      .is('pause_ended_at', null)
+      .limit(1);
+
+    const activeLog = activeLogs?.[0];
+    if (activeLog) {
+      const pauseStart = new Date(activeLog.pause_started_at).getTime();
+      const pausedSecs = Math.floor((Date.now() - pauseStart) / 1000);
+      await supabase.from('pause_logs').update({
+        pause_ended_at: new Date().toISOString(),
+        paused_seconds: pausedSecs,
+      } as any).eq('id', activeLog.id);
+    }
+
+    const additionalPaused = activeLog ? Math.floor((Date.now() - new Date(activeLog.pause_started_at).getTime()) / 1000) : 0;
+
+    await supabase.from('tickets').update({
+      status: 'em_andamento',
+      started_at: new Date().toISOString(),
+      pause_started_at: null,
+      total_paused_seconds: (ticket.total_paused_seconds || 0) + additionalPaused,
+    } as any).eq('id', ticket.id);
+
+    await supabase.from('ticket_status_logs').insert({
+      ticket_id: ticket.id, changed_by: user.id, old_status: 'pausado', new_status: 'em_andamento',
+    });
+
+    toast({ title: 'Pausa retomada pelo supervisor' });
     queryClient.invalidateQueries({ queryKey: ['supervisor-tickets'] });
   };
 
@@ -317,6 +354,11 @@ const SupervisorPanel = () => {
                         {ticket.status === 'finalizado' && (
                           <Button size="sm" variant="outline" onClick={() => reopenTicket(ticket)}>
                             <RotateCcw className="mr-1 h-3 w-3" /> Reabrir
+                          </Button>
+                        )}
+                        {ticket.status === 'pausado' && (
+                          <Button size="sm" variant="outline" onClick={() => resumeTicket(ticket)}>
+                            <Play className="mr-1 h-3 w-3" /> Retomar
                           </Button>
                         )}
                       </TableCell>

@@ -59,6 +59,11 @@ const Login = () => {
               {loading ? 'Entrando...' : 'Entrar'}
             </Button>
           </form>
+          <div className="mt-4 pt-4 border-t border-border">
+            <Button variant="outline" className="w-full" onClick={() => navigate('/public-ticket')}>
+              Chamado sem login
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>
