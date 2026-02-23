@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChevronDown, ChevronUp, FileSpreadsheet, AlertCircle, Image as ImageIcon } from 'lucide-react';
-import { Ticket, PRIORITY_LABELS, TYPE_LABELS, STATUS_LABELS, Profile, PauseLog } from '@/types/tickets';
+import { Ticket, PRIORITY_LABELS, STATUS_LABELS, Profile, PauseLog } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
 import ResolvePendencyDialog from '@/components/ResolvePendencyDialog';
 
@@ -50,6 +50,17 @@ const AnalystPanel = () => {
     },
     staleTime: 60_000,
   });
+
+  const { data: ticketTypes = [] } = useQuery({
+    queryKey: ['analyst-ticket-types'],
+    queryFn: async () => {
+      const { data } = await supabase.from('ticket_types').select('value, label').eq('active', true).order('label');
+      return (data || []) as { value: string; label: string }[];
+    },
+    staleTime: 120_000,
+  });
+
+  const getTypeLabel = (value: string) => ticketTypes.find(t => t.value === value)?.label || value;
 
   const getProfileName = (id: string | null) => {
     if (!id) return 'Não atribuído';
@@ -283,7 +294,7 @@ const AnalystPanel = () => {
                             <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
                             <TableCell>{ticket.base_name}</TableCell>
                             <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
-                            <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
+                            <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                             <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
                             <TableCell><LiveTimer ticket={ticket} /></TableCell>
                             <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
@@ -410,7 +421,7 @@ const AnalystPanel = () => {
                             <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
                             <TableCell>{ticket.base_name}</TableCell>
                             <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
-                            <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
+                            <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                             <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">

@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Play } from 'lucide-react';
-import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, Profile, PauseLog } from '@/types/tickets';
+import { Ticket, STATUS_LABELS, PRIORITY_LABELS, Profile, PauseLog } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
 import { Link } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
@@ -60,6 +60,15 @@ const SupervisorPanel = () => {
     staleTime: 30_000,
   });
 
+  const { data: ticketTypes = [] } = useQuery({
+    queryKey: ['supervisor-ticket-types'],
+    queryFn: async () => {
+      const { data } = await supabase.from('ticket_types').select('value, label').eq('active', true).order('label');
+      return (data || []) as { value: string; label: string }[];
+    },
+    staleTime: 120_000,
+  });
+
   const { data: ticketData, isLoading: loading } = useQuery({
     queryKey: ['supervisor-tickets', filterStatus, filterPriority, filterType, filterAnalyst, filterDateFrom, filterDateTo, page],
     queryFn: async () => {
@@ -76,6 +85,26 @@ const SupervisorPanel = () => {
 
       const { data, count } = await query.order('created_at', { ascending: false }).range(from, to);
       return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
+    },
+    staleTime: 30_000,
+  });
+
+  // Separate query for global status counts (not affected by pagination or filters)
+  const { data: statusCounts } = useQuery({
+    queryKey: ['supervisor-status-counts'],
+    queryFn: async () => {
+      const [inProgressRes, pausedRes, finishedRes, totalRes] = await Promise.all([
+        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'em_andamento'),
+        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'pausado'),
+        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'finalizado'),
+        supabase.from('tickets').select('id', { count: 'exact', head: true }),
+      ]);
+      return {
+        inProgress: inProgressRes.count || 0,
+        paused: pausedRes.count || 0,
+        finished: finishedRes.count || 0,
+        total: totalRes.count || 0,
+      };
     },
     staleTime: 30_000,
   });
@@ -155,6 +184,7 @@ const SupervisorPanel = () => {
     });
     toast({ title: 'Chamado reaberto' });
     queryClient.invalidateQueries({ queryKey: ['supervisor-tickets'] });
+    queryClient.invalidateQueries({ queryKey: ['supervisor-status-counts'] });
   };
 
   const resumeTicket = async (ticket: Ticket) => {
@@ -192,6 +222,7 @@ const SupervisorPanel = () => {
 
     toast({ title: 'Pausa retomada pelo supervisor' });
     queryClient.invalidateQueries({ queryKey: ['supervisor-tickets'] });
+    queryClient.invalidateQueries({ queryKey: ['supervisor-status-counts'] });
   };
 
   useEffect(() => {
@@ -199,14 +230,16 @@ const SupervisorPanel = () => {
       .channel('supervisor-tickets-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, () => {
         queryClient.invalidateQueries({ queryKey: ['supervisor-tickets'] });
+        queryClient.invalidateQueries({ queryKey: ['supervisor-status-counts'] });
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [queryClient]);
 
-  const inProgress = tickets.filter(t => t.status === 'em_andamento').length;
-  const paused = tickets.filter(t => t.status === 'pausado').length;
-  const finished = tickets.filter(t => t.status === 'finalizado').length;
+  const globalInProgress = statusCounts?.inProgress || 0;
+  const globalPaused = statusCounts?.paused || 0;
+  const globalFinished = statusCounts?.finished || 0;
+  const globalTotal = statusCounts?.total || 0;
   const finishedAll = tickets.filter(t => t.status === 'finalizado');
   const avgTime = finishedAll.length > 0
     ? Math.round(finishedAll.reduce((a, t) => a + (t.total_execution_seconds || 0), 0) / finishedAll.length)
@@ -228,28 +261,28 @@ const SupervisorPanel = () => {
               <CardTitle className="text-sm font-medium text-muted-foreground">Total</CardTitle>
               <ClipboardList className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
-            <CardContent><p className="text-3xl font-bold">{totalCount}</p></CardContent>
+            <CardContent><p className="text-3xl font-bold">{globalTotal}</p></CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Em Andamento</CardTitle>
               <PlayCircle className="h-4 w-4 text-primary" />
             </CardHeader>
-            <CardContent><p className="text-3xl font-bold text-primary">{inProgress}</p></CardContent>
+            <CardContent><p className="text-3xl font-bold text-primary">{globalInProgress}</p></CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Em Pausa</CardTitle>
               <PauseCircle className="h-4 w-4 text-warning" />
             </CardHeader>
-            <CardContent><p className="text-3xl font-bold text-warning">{paused}</p></CardContent>
+            <CardContent><p className="text-3xl font-bold text-warning">{globalPaused}</p></CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Finalizados</CardTitle>
               <CheckCircle className="h-4 w-4 text-success" />
             </CardHeader>
-            <CardContent><p className="text-3xl font-bold text-success">{finished}</p></CardContent>
+            <CardContent><p className="text-3xl font-bold text-success">{globalFinished}</p></CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -290,7 +323,7 @@ const SupervisorPanel = () => {
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos</SelectItem>
-                    {Object.entries(TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                    {ticketTypes.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -345,7 +378,7 @@ const SupervisorPanel = () => {
                       <TableCell>{ticket.base_name}</TableCell>
                       <TableCell>{ticket.requester_name}</TableCell>
                       <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
-                      <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
+                      <TableCell>{ticketTypes.find(t => t.value === ticket.type)?.label || ticket.type}</TableCell>
                       <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
                       <TableCell className="text-sm">{getAnalystName(ticket.assigned_analyst_id)}</TableCell>
                       <TableCell><LiveTimer ticket={ticket} /></TableCell>

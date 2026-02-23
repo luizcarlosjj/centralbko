@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
-import { Ticket, PRIORITY_LABELS, TYPE_LABELS, Profile, UserRole } from '@/types/tickets';
+import { Ticket, PRIORITY_LABELS, Profile, UserRole } from '@/types/tickets';
 import { ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, Users, TrendingUp, Calendar } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -48,6 +48,15 @@ const MetricsDashboard = () => {
     queryFn: async () => {
       const { data } = await supabase.from('user_roles').select('user_id, role');
       return (data || []) as Pick<UserRole, 'user_id' | 'role'>[];
+    },
+    staleTime: 120_000,
+  });
+
+  const { data: ticketTypes = [] } = useQuery({
+    queryKey: ['metrics-ticket-types'],
+    queryFn: async () => {
+      const { data } = await supabase.from('ticket_types').select('value, label').eq('active', true).order('label');
+      return (data || []) as { value: string; label: string }[];
     },
     staleTime: 120_000,
   });
@@ -127,10 +136,16 @@ const MetricsDashboard = () => {
     value: tickets.filter(t => t.priority === key).length,
   }));
 
-  const byType = Object.entries(TYPE_LABELS).map(([key, label]) => ({
-    name: label,
+  // Build type labels map from dynamic data, with fallback for legacy types
+  const typeLabelsMap: Record<string, string> = {};
+  ticketTypes.forEach(t => { typeLabelsMap[t.value] = t.label; });
+  // Also collect any types present in tickets but not in ticketTypes
+  const allTypeKeys = new Set([...Object.keys(typeLabelsMap), ...tickets.map(t => t.type)]);
+
+  const byType = Array.from(allTypeKeys).map(key => ({
+    name: typeLabelsMap[key] || key,
     value: tickets.filter(t => t.type === key).length,
-  }));
+  })).filter(t => t.value > 0);
 
   const byBackoffice = backofficeRanking.map(b => ({
     name: b.name,

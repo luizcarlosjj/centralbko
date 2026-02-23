@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
-import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TYPE_LABELS, TicketStatus, PauseLog } from '@/types/tickets';
+import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TicketStatus, PauseLog } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
@@ -53,6 +53,17 @@ const AnalystPanel = () => {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [pauseLogs, setPauseLogs] = useState<Record<string, PauseLog[]>>({});
   const [pauseReasonNames, setPauseReasonNames] = useState<Record<string, string>>({});
+
+  const { data: ticketTypes = [] } = useQuery({
+    queryKey: ['backoffice-ticket-types'],
+    queryFn: async () => {
+      const { data } = await supabase.from('ticket_types').select('value, label').eq('active', true).order('label');
+      return (data || []) as { value: string; label: string }[];
+    },
+    staleTime: 120_000,
+  });
+
+  const getTypeLabel = (value: string) => ticketTypes.find(t => t.value === value)?.label || value;
 
   const { data: openData, isLoading: openLoading } = useQuery({
     queryKey: ['analyst-open-tickets', user?.id, openPage],
@@ -248,7 +259,7 @@ const AnalystPanel = () => {
                       <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos</SelectItem>
-                        {Object.entries(TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                        {ticketTypes.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -296,7 +307,7 @@ const AnalystPanel = () => {
                             <TableCell>{ticket.base_name}</TableCell>
                             <TableCell>{ticket.requester_name}</TableCell>
                             <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
-                            <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
+                            <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                             <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
                             <TableCell>
                               {ticket.attachment_url ? (() => {
@@ -405,7 +416,7 @@ const AnalystPanel = () => {
                             <TableCell>{ticket.base_name}</TableCell>
                             <TableCell>{ticket.requester_name}</TableCell>
                             <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
-                            <TableCell>{TYPE_LABELS[ticket.type]}</TableCell>
+                            <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_paused_seconds || 0)}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">
