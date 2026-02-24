@@ -5,7 +5,7 @@ import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
 import { Ticket, PRIORITY_LABELS, Profile, UserRole } from '@/types/tickets';
-import { ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, Users, TrendingUp, Calendar } from 'lucide-react';
+import { ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, Users, TrendingUp, Calendar, Target } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -75,6 +75,15 @@ const MetricsDashboard = () => {
 
   // Taxa de conclusão: (finalizados + pausados) / total recebidos
   const conclusionRate = total > 0 ? (((finished + paused) / total) * 100).toFixed(1) : '0.0';
+
+  // Meta 48h: (finalizados em até 48h + pausados) / total recebidos
+  const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+  const finishedWithin48h = finishedTickets.filter(t => {
+    if (!t.finished_at) return false;
+    const elapsed = new Date(t.finished_at).getTime() - new Date(t.created_at).getTime();
+    return elapsed <= FORTY_EIGHT_HOURS_MS;
+  }).length;
+  const meta48hRate = total > 0 ? (((finishedWithin48h + paused) / total) * 100).toFixed(1) : '0.0';
 
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -228,6 +237,51 @@ const MetricsDashboard = () => {
       weeklyCreatedMap.set(key, existing);
     });
 
+  // --- Per-backoffice daily breakdown ---
+  const backofficeProfiles = profiles.filter(p => backofficeUserIds.has(p.id));
+
+  const dailyByBackoffice = backofficeProfiles.map(p => {
+    const userTickets = tickets.filter(t => t.assigned_analyst_id === p.id);
+    const dailyMap = new Map<string, { recebidos: number; concluidos: number }>();
+    userTickets.filter(t => new Date(t.created_at) >= last30).forEach(t => {
+      const day = new Date(t.created_at).toLocaleDateString('pt-BR');
+      const e = dailyMap.get(day) || { recebidos: 0, concluidos: 0 };
+      e.recebidos++;
+      dailyMap.set(day, e);
+    });
+    userTickets.filter(t => t.status === 'finalizado' && t.finished_at && new Date(t.finished_at) >= last30).forEach(t => {
+      const day = new Date(t.finished_at!).toLocaleDateString('pt-BR');
+      const e = dailyMap.get(day) || { recebidos: 0, concluidos: 0 };
+      e.concluidos++;
+      dailyMap.set(day, e);
+    });
+    return { name: p.name, dailyMap };
+  });
+
+  // --- Per-backoffice weekly breakdown ---
+  const weeklyByBackoffice = backofficeProfiles.map(p => {
+    const userTickets = tickets.filter(t => t.assigned_analyst_id === p.id);
+    const wMap = new Map<string, { label: string; recebidos: number; concluidos: number }>();
+    userTickets.filter(t => new Date(t.created_at) >= last30).forEach(t => {
+      const d = new Date(t.created_at);
+      const key = getWeekSortKey(d);
+      const label = getWeekLabel(d);
+      const e = wMap.get(key) || { label, recebidos: 0, concluidos: 0 };
+      e.recebidos++;
+      wMap.set(key, e);
+    });
+    userTickets.filter(t => t.status === 'finalizado' && t.finished_at && new Date(t.finished_at) >= last30).forEach(t => {
+      const d = new Date(t.finished_at!);
+      const key = getWeekSortKey(d);
+      const label = getWeekLabel(d);
+      const e = wMap.get(key) || { label, recebidos: 0, concluidos: 0 };
+      e.concluidos++;
+      wMap.set(key, e);
+    });
+    const data = Array.from(wMap.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+    return { name: p.name, data };
+  });
+
   const weeklyData = Array.from(weeklyCreatedMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, v]) => ({
@@ -309,8 +363,8 @@ const MetricsDashboard = () => {
           </Card>
         </div>
 
-        {/* Summary cards - now with 7 cards including conclusion rate */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-xs font-medium text-muted-foreground">Total</CardTitle>
@@ -345,6 +399,16 @@ const MetricsDashboard = () => {
               <TrendingUp className="h-4 w-4 text-success" />
             </CardHeader>
             <CardContent><p className="text-2xl font-bold text-success">{conclusionRate}%</p></CardContent>
+          </Card>
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-medium text-primary">Meta 48h</CardTitle>
+              <Target className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold text-primary">{meta48hRate}%</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{finishedWithin48h} concl. em 48h</p>
+            </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -381,17 +445,60 @@ const MetricsDashboard = () => {
                 {dailyCombined.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-8">Sem dados nos últimos 30 dias</p>
                 ) : (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={dailyCombined}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={60} />
-                      <YAxis allowDecimals={false} />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="recebidos" fill="hsl(270, 67%, 45%)" name="Recebidos" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="concluidos" fill="hsl(142, 71%, 45%)" name="Concluídos" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <div className="space-y-4">
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={dailyCombined}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={60} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip />
+                        <Legend />
+                        <Bar dataKey="recebidos" fill="hsl(270, 67%, 45%)" name="Recebidos" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="concluidos" fill="hsl(142, 71%, 45%)" name="Concluídos" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+
+                    {/* Per-backoffice daily breakdown */}
+                    {dailyByBackoffice.length > 0 && (
+                      <div className="overflow-x-auto border rounded-lg">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted">
+                            <tr>
+                              <th className="text-left p-2 font-medium">Backoffice</th>
+                              {Array.from(allDays).sort((a, b) => a.split('/').reverse().join('-').localeCompare(b.split('/').reverse().join('-'))).slice(-7).map(day => (
+                                <th key={day} className="text-center p-2 font-medium text-xs">{day.slice(0, 5)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dailyByBackoffice.map((bo) => {
+                              const sortedDays = Array.from(allDays).sort((a, b) => a.split('/').reverse().join('-').localeCompare(b.split('/').reverse().join('-'))).slice(-7);
+                              return (
+                                <tr key={bo.name} className="border-t">
+                                  <td className="p-2 font-medium">{bo.name}</td>
+                                  {sortedDays.map(day => {
+                                    const d = bo.dailyMap.get(day);
+                                    return (
+                                      <td key={day} className="p-2 text-center text-xs">
+                                        {d ? (
+                                          <span>
+                                            <span className="text-muted-foreground">{d.recebidos}</span>
+                                            {' / '}
+                                            <span className="text-success font-medium">{d.concluidos}</span>
+                                          </span>
+                                        ) : '—'}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        <p className="text-[10px] text-muted-foreground p-2">Recebidos / <span className="text-success">Concluídos</span> (últimos 7 dias)</p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </TabsContent>
 
@@ -445,6 +552,45 @@ const MetricsDashboard = () => {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Per-backoffice weekly breakdown */}
+                    {weeklyByBackoffice.length > 0 && (
+                      <div className="overflow-x-auto border rounded-lg">
+                        <p className="text-sm font-medium p-2 bg-muted">Detalhamento por Backoffice</p>
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="text-left p-2 font-medium">Backoffice</th>
+                              {weeklyData.map((w, i) => (
+                                <th key={i} className="text-center p-2 font-medium text-xs">{w.semana}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {weeklyByBackoffice.map((bo) => (
+                              <tr key={bo.name} className="border-t">
+                                <td className="p-2 font-medium">{bo.name}</td>
+                                {weeklyData.map((w, i) => {
+                                  const match = bo.data.find(d => d.label === w.semana);
+                                  return (
+                                    <td key={i} className="p-2 text-center text-xs">
+                                      {match ? (
+                                        <span>
+                                          <span className="text-muted-foreground">{match.recebidos}</span>
+                                          {' / '}
+                                          <span className="text-success font-medium">{match.concluidos}</span>
+                                        </span>
+                                      ) : '—'}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <p className="text-[10px] text-muted-foreground p-2">Recebidos / <span className="text-success">Concluídos</span></p>
+                      </div>
+                    )}
                   </div>
                 )}
               </TabsContent>
