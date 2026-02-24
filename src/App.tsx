@@ -19,6 +19,7 @@ const PublicTicketForm = React.lazy(() => import("@/pages/PublicTicketForm"));
 const RequesterManagement = React.lazy(() => import("@/pages/RequesterManagement"));
 const BulkImport = React.lazy(() => import("@/pages/BulkImport"));
 const TicketTypes = React.lazy(() => import("@/pages/TicketTypes"));
+const PublicTracking = React.lazy(() => import("@/pages/PublicTracking"));
 
 const queryClient = new QueryClient();
 
@@ -40,6 +41,7 @@ const App = () => (
               <Route path="/" element={<Navigate to="/login" replace />} />
               <Route path="/login" element={<Login />} />
               <Route path="/public-ticket" element={<Suspense fallback={<PageLoader />}><PublicTicketForm /></Suspense>} />
+              <Route path="/public-tracking" element={<Suspense fallback={<PageLoader />}><PublicTracking /></Suspense>} />
               <Route path="/dashboard" element={
                 <ProtectedRoute>
                   <Dashboard />
