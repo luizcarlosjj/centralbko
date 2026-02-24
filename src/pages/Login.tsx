@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { LogIn, Headphones } from 'lucide-react';
+import { LogIn, Headphones, Search } from 'lucide-react';
 
 const Login = () => {
   const { signIn, user, loading: authLoading } = useAuth();
@@ -59,9 +59,13 @@ const Login = () => {
               {loading ? 'Entrando...' : 'Entrar'}
             </Button>
           </form>
-          <div className="mt-4 pt-4 border-t border-border">
+          <div className="mt-4 pt-4 border-t border-border space-y-2">
             <Button variant="outline" className="w-full" onClick={() => navigate('/public-ticket')}>
               Chamado sem login
+            </Button>
+            <Button variant="outline" className="w-full" onClick={() => navigate('/public-tracking')}>
+              <Search className="mr-2 h-4 w-4" />
+              Acompanhar Tickets
             </Button>
           </div>
         </CardContent>
