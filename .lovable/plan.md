@@ -1,83 +1,101 @@
 
-# Importacao em Massa dos Dados da Planilha Fevereiro 2026
+# Painel de Consulta Publica de Tickets
 
 ## Resumo
+Criar um fluxo publico (sem login) para que solicitantes possam acompanhar o status dos seus chamados. O fluxo consiste em: botao na tela de login -> pagina de selecao de solicitante -> modal com tabela de resultados.
 
-Criar uma edge function que receba os dados mapeados da planilha e insira todos os registros na tabela `tickets` do sistema, associando corretamente os solicitantes (requesters), backoffice responsavel e status.
+## Componentes e Arquivos
 
-## Dados Identificados
+### 1. Botao na Tela de Login (`src/pages/Login.tsx`)
+- Adicionar botao outline "Acompanhar Tickets" abaixo do botao "Chamado sem login"
+- Navega para `/public-tracking`
+- Icone: `Search` do lucide-react
 
-A aba "Fevereiro2026" (Page 5 da planilha) contem 93 registros validos (linhas 1389 a 1481) com as seguintes colunas mapeadas:
+### 2. Nova Rota (`src/App.tsx`)
+- Adicionar rota publica `/public-tracking` com lazy loading, mesmo padrao das rotas publicas existentes
 
-| Coluna Planilha | Campo no Sistema |
-|---|---|
-| A - Implantador | `requester_name` (solicitante) |
-| C - CLIENTE | `base_name` |
-| J - Tipo | `type` (mapeado para os tipos do sistema) |
-| K - Atribuido a | `assigned_analyst_id` (backoffice responsavel) |
-| D - DATA | `created_at` (data de abertura) |
-| F - DATA CONCLUSAO | `finished_at` (data de conclusao) |
-| G - TEMPO PARA CONCLUSAO | `total_execution_seconds` (convertido de HH:MM para segundos) |
-| H - STATUS | `status` (mapeado para os status do sistema) |
+### 3. Nova Pagina: `src/pages/PublicTracking.tsx`
+- Layout visual identico ao `PublicTicketForm` (gradient background, card centralizado)
+- Titulo: "Acompanhar Chamados"
+- Componentes internos:
+  - **Select searchable** com lista de solicitantes ativos (query na tabela `requesters` com RLS ja existente para anon)
+  - **Botao** "Consultar Chamados"
+  - **Botao ghost** "Voltar ao Login"
+- Ao clicar em consultar, abre o modal de resultados
 
-## Mapeamento de Status
+### 4. Modal de Resultados (dentro de `PublicTracking.tsx`)
+- Usar componente `Dialog` existente com `max-w-[90vw]` no desktop
+- Conteudo:
+  - Titulo com nome do solicitante selecionado
+  - **Desktop**: Tabela com colunas:
+    - ID (8 primeiros chars, uppercase)
+    - Base
+    - Status (badge colorido)
+    - Responsavel (nome do backoffice via join com profiles)
+    - Tempo Util (calculado com `calculateBusinessSeconds`)
+  - **Mobile**: Cards empilhados verticalmente com as mesmas informacoes
+  - Paginacao de 20 registros
+  - Botao de refresh manual
 
-| Planilha | Sistema |
-|---|---|
-| Concluido | `finalizado` |
-| Cancelado | `finalizado` |
-| Aguardando Cliente/ISM | `pausado` |
-| Em andamento | `em_andamento` |
-| Nao iniciado | `nao_iniciado` |
+### 5. Query de Dados
+- Buscar da tabela `tickets` filtrando por `requester_name = solicitante selecionado`
+- Campos: `id, base_name, status, assigned_analyst_id, created_at, started_at, total_execution_seconds, total_paused_seconds, finished_at, pause_started_at`
+- Join com `profiles` para nome do responsavel
+- Ordenar por `created_at` desc
+- Paginacao server-side com `.range()`
 
-## Mapeamento de Tipos
+### 6. Seguranca - RLS
+- Atualmente a tabela `tickets` exige autenticacao para SELECT (policy `Role-based ticket visibility`)
+- Sera necessario criar uma **nova RLS policy** para permitir SELECT anonimo com campos restritos
+- Policy: `Anyone can view tickets by requester name` - SELECT para `anon` role, restringindo via funcao/view ou liberando SELECT simples
+- **Alternativa mais segura**: Criar uma **Edge Function** `get-public-tickets` que usa o service_role para buscar os dados e retorna apenas os campos permitidos. Isso evita expor a tabela tickets diretamente para anonimos.
 
-| Planilha | Sistema |
-|---|---|
-| Cliente, Clientes, Colaboradores, Colaborador/Clientes, etc. | `cliente` |
-| Questionarios, Quest/pmoc | `setup_questionario` |
-| Equipamento, Equipamentos, Produtos, etc. | `ajuste` |
-| Tarefas, Outros, Servico | `outro` |
-| Tipos combinados (ex: "Cliente/Equipamentos") | `cliente` (prioriza o primeiro) |
+## Decisao de Arquitetura: Edge Function vs RLS
 
-## Usuarios no Sistema
+Recomendo usar uma **Edge Function** (`get-public-tickets`) pelos seguintes motivos:
+- Nao expoe a tabela `tickets` para usuarios anonimos
+- Controle total dos campos retornados (sem risco de vazar dados internos)
+- Nao precisa alterar RLS existente (zero impacto no sistema)
+- Permite fazer o join com `profiles` server-side
 
-- Backoffice unico: **Andre** (ID: `2b9383d5-fc10-4d2e-9e38-1a9e88be1181`) -- todas as linhas exceto a ultima que nao tem backoffice atribuido
-- Solicitantes ja cadastrados: todos os nomes da coluna A ja existem na tabela `requesters`
+### 7. Edge Function: `supabase/functions/get-public-tickets/index.ts`
+- Recebe: `{ requester_name: string, page: number }`
+- Valida input
+- Busca tickets filtrados por `requester_name` com paginacao (20 por pagina)
+- Faz join com `profiles` para nome do responsavel
+- Retorna apenas: `id, base_name, status, analyst_name, created_at, started_at, total_execution_seconds, total_paused_seconds, finished_at, pause_started_at`
+- Retorna `total_count` para paginacao
 
-## Plano de Implementacao
+## Detalhes Tecnicos
 
-### 1. Criar Edge Function `bulk-import-tickets`
-- Recebe array de objetos com os dados mapeados
-- Usa service role key para bypass de RLS
-- Para cada registro:
-  - Converte tempo "HH:MM" em segundos para `total_execution_seconds`
-  - Atribui `assigned_analyst_id` ao Andre (backoffice)
-  - Define `requester_user_id = null` (chamados externos)
-  - Define `started_at` = `created_at` para tickets que foram iniciados
-  - Define `finished_at` para tickets concluidos
-  - Insere `ticket_status_logs` correspondentes
+### Calculo de Tempo Util
+- Reutilizar `calculateBusinessSeconds` de `src/lib/business-time.ts`
+- Para tickets em andamento: calcular tempo desde `started_at` ate agora, subtraindo pausas
+- Para finalizados: usar `total_execution_seconds`
+- Formatar em `Xh Xmin`
 
-### 2. Criar pagina/script de importacao
-- Uma pagina acessivel apenas pelo supervisor
-- Contem os dados hardcoded extraidos da planilha (93 registros)
-- Botao "Importar Dados" que chama a edge function
-- Progress bar e feedback visual
-- Protecao contra importacao duplicada
+### Responsividade
+- Usar `useIsMobile()` hook existente
+- Desktop: componente `Table` padrao
+- Mobile: cards com layout vertical usando `Card` existente
 
-### 3. Arquivos
+### Status Badges
+- Reutilizar o mesmo mapeamento de cores ja usado no `SupervisorPanel`:
+  - `em_andamento` -> primary
+  - `pausado` -> warning  
+  - `finalizado` -> success
+  - `nao_iniciado` -> secondary
 
-- **Criar**: `supabase/functions/bulk-import-tickets/index.ts`
-- **Criar**: `src/pages/BulkImport.tsx` (pagina de importacao com dados hardcoded)
-- **Editar**: `src/App.tsx` (rota `/bulk-import`)
-- **Editar**: `supabase/config.toml` (configuracao da nova edge function)
+### Arquivos a Criar
+1. `src/pages/PublicTracking.tsx` - Pagina principal com select + modal + tabela
+2. `supabase/functions/get-public-tickets/index.ts` - Edge Function segura
 
-### Detalhes Tecnicos
+### Arquivos a Modificar
+1. `src/pages/Login.tsx` - Adicionar botao "Acompanhar Tickets"
+2. `src/App.tsx` - Adicionar rota `/public-tracking`
 
-A edge function:
-1. Recebe POST com array de tickets
-2. Para cada ticket, faz INSERT na tabela `tickets` com os campos mapeados
-3. Para tickets com status `finalizado`, insere um `ticket_status_log` de `nao_iniciado` para `finalizado`
-4. Retorna contagem de sucesso/falha
-
-Os 93 registros serao codificados diretamente na pagina de importacao, ja convertidos para o formato correto do sistema, evitando necessidade de parsing de Excel no frontend.
+### Nenhuma alteracao em
+- Logica de tickets existente
+- Fluxos internos (analyst, backoffice, supervisor)
+- RLS policies existentes
+- Tabelas do banco de dados
