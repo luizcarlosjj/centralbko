@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Upload, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Trash2, FileSpreadsheet, X, Download } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -18,8 +18,45 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import * as XLSX from 'xlsx';
 
 const ANDRE_ID = "2b9383d5-fc10-4d2e-9e38-1a9e88be1181";
+
+// Expected column names (case-insensitive, trimmed)
+const EXPECTED_COLUMNS = [
+  'solicitante',
+  'base',
+  'data criação',
+  'data conclusão',
+  'tempo execução',
+  'status',
+  'tipo',
+  'responsável',
+];
+
+// Alternative accepted column names
+const COLUMN_ALIASES: Record<string, string[]> = {
+  solicitante: ['solicitante', 'requester', 'nome solicitante'],
+  base: ['base', 'base_name', 'nome da base', 'nome base'],
+  'data criação': ['data criação', 'data criacao', 'criação', 'criacao', 'created', 'data abertura', 'abertura'],
+  'data conclusão': ['data conclusão', 'data conclusao', 'conclusão', 'conclusao', 'finished', 'data finalização', 'finalização'],
+  'tempo execução': ['tempo execução', 'tempo execucao', 'tempo', 'execution_time', 'tempo util'],
+  status: ['status', 'situação', 'situacao'],
+  tipo: ['tipo', 'type', 'categoria'],
+  'responsável': ['responsável', 'responsavel', 'assigned', 'backoffice', 'analista'],
+};
+
+function normalizeHeader(h: string): string {
+  return h.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function matchColumn(header: string): string | null {
+  const norm = normalizeHeader(header);
+  for (const [key, aliases] of Object.entries(COLUMN_ALIASES)) {
+    if (aliases.some(a => norm === a || norm.includes(a))) return key;
+  }
+  return null;
+}
 
 function mapType(raw: string): string {
   const r = raw.toLowerCase().trim();
@@ -31,32 +68,41 @@ function mapType(raw: string): string {
 
 function mapStatus(raw: string): string {
   const r = raw.toLowerCase().trim();
-  if (r.includes("concluido") || r.includes("cancelado")) return "finalizado";
+  if (r.includes("concluido") || r.includes("cancelado") || r.includes("concluído")) return "finalizado";
   if (r.includes("aguardando")) return "pausado";
   if (r.includes("andamento")) return "em_andamento";
   if (r.includes("não iniciado") || r.includes("nao iniciado")) return "nao_iniciado";
   return "nao_iniciado";
 }
 
-// Parse dates like "2/2/26", "12/02/2026 11:08:13", etc.
-function parseDate(raw: string): string | null {
-  if (!raw || raw.trim() === "") return null;
-  const s = raw.trim();
-  
-  // Try MM/DD/YYYY HH:MM:SS or DD/MM/YYYY HH:MM:SS
+function parseDate(raw: string | number | undefined): string | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+
+  // Handle Excel serial date numbers
+  if (typeof raw === 'number') {
+    const date = XLSX.SSF.parse_date_code(raw);
+    if (date) {
+      return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}T${String(date.H || 8).padStart(2, '0')}:${String(date.M || 0).padStart(2, '0')}:${String(date.S || 0).padStart(2, '0')}`;
+    }
+    return null;
+  }
+
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // Try DD/MM/YYYY HH:MM:SS or MM/DD/YYYY HH:MM:SS
   const dtMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2}):?(\d{2})?$/);
   if (dtMatch) {
     let [, p1, p2, yr, h, m, sec] = dtMatch;
     let year = parseInt(yr);
     if (year < 100) year += 2000;
-    // Determine if day/month or month/day - use context (Feb 2026 data)
     let month = parseInt(p1);
     let day = parseInt(p2);
     if (month > 12) { month = parseInt(p2); day = parseInt(p1); }
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(h).padStart(2, '0')}:${m}:${sec || '00'}`;
   }
-  
-  // Simple date M/D/YY
+
+  // Simple date M/D/YY or D/M/YY
   const simple = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (simple) {
     let [, p1, p2, yr] = simple;
@@ -67,136 +113,192 @@ function parseDate(raw: string): string | null {
     if (month > 12) { month = parseInt(p2); day = parseInt(p1); }
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T08:00:00`;
   }
-  
+
+  // Try ISO-like
+  const isoDate = new Date(s);
+  if (!isNaN(isoDate.getTime())) {
+    return isoDate.toISOString().slice(0, 19);
+  }
+
   return null;
 }
 
-interface RawRecord {
+interface ParsedRow {
   requester_name: string;
   base_name: string;
-  created_at_raw: string;
-  finished_at_raw: string;
+  created_at_raw: string | number;
+  finished_at_raw: string | number;
   execution_time: string;
   status_raw: string;
   type_raw: string;
   assigned: string;
 }
 
-// 93 records from the spreadsheet
-const RAW_DATA: RawRecord[] = [
-  { requester_name: "Guilherme", base_name: "218704 - SUPORTE", created_at_raw: "2/2/26", finished_at_raw: "2/2/26", execution_time: "00:09", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Daniela", base_name: "220818 - Move Engenharia e Elevadores", created_at_raw: "2/2/26", finished_at_raw: "12/02/2026 11:08:13", execution_time: "06:20", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Jullia", base_name: "81223 - Center Line", created_at_raw: "2/2/26", finished_at_raw: "", execution_time: "", status_raw: "Cancelado", type_raw: "Serviço", assigned: "" },
-  { requester_name: "Daniela", base_name: "221184 - MULTIPLUS", created_at_raw: "2/2/26", finished_at_raw: "2/3/26", execution_time: "08:42", status_raw: "Concluido", type_raw: "Produtos", assigned: "André" },
-  { requester_name: "Adonias", base_name: "205192 - Ar Vix", created_at_raw: "2/2/26", finished_at_raw: "2/2/26", execution_time: "00:33", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Jullia", base_name: "221736 - Visiocam", created_at_raw: "2/2/26", finished_at_raw: "2/3/26", execution_time: "01:10", status_raw: "Concluido", type_raw: "Clientes/Fornecedores", assigned: "André" },
-  { requester_name: "Adonias", base_name: "209367 - A Predial Engenharia de Manutencao", created_at_raw: "2/2/26", finished_at_raw: "2/2/26", execution_time: "00:28", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Marianna", base_name: "221475 - Grupo Os Manutencoes", created_at_raw: "2/2/26", finished_at_raw: "2/3/26", execution_time: "03:41", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "querino", base_name: "219347 - J.A piscinas", created_at_raw: "2/2/26", finished_at_raw: "03/02/2026 09:36:00", execution_time: "05:17", status_raw: "Concluido", type_raw: "Tarefas", assigned: "André" },
-  { requester_name: "Daniela", base_name: "221340 - FERNANDO PEREIRA GRUHN", created_at_raw: "2/3/26", finished_at_raw: "2/3/26", execution_time: "01:31", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Marianna", base_name: "220669 - Mary Móveis Planejados", created_at_raw: "2/3/26", finished_at_raw: "2/3/26", execution_time: "01:05", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Silva", base_name: "212188 - Amj Security Fire", created_at_raw: "2/3/26", finished_at_raw: "2/3/26", execution_time: "03:02", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Janaina", base_name: "213641 - CLIMATEC AR CONDICION", created_at_raw: "2/3/26", finished_at_raw: "2/3/26", execution_time: "03:29", status_raw: "Concluido", type_raw: "Cliente/Equipamentos", assigned: "André" },
-  { requester_name: "jullia", base_name: "220609 - NOW QUIMICA", created_at_raw: "2/3/26", finished_at_raw: "2/3/26", execution_time: "01:28", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Monique", base_name: "217014 - Tech Frio Refrigeracao e Eletrica", created_at_raw: "2/3/26", finished_at_raw: "2/4/26", execution_time: "01:05", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Daniela", base_name: "218893 - PlanVolt", created_at_raw: "2/3/26", finished_at_raw: "2/4/26", execution_time: "01:55", status_raw: "Concluido", type_raw: "Produtos", assigned: "André" },
-  { requester_name: "Daniela", base_name: "221677 - Omega Manutencao Eletrica", created_at_raw: "2/3/26", finished_at_raw: "2/4/26", execution_time: "03:02", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Janine", base_name: "221084 - BHIO SERVICE COMPONENTES DE PRECISAO", created_at_raw: "2/4/26", finished_at_raw: "2/4/26", execution_time: "02:36", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Janine", base_name: "221084 - BHIO SERVICE COMPONENTES DE PRECISAO", created_at_raw: "2/4/26", finished_at_raw: "", execution_time: "", status_raw: "Cancelado", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Daniela", base_name: "221710 - RIBEIRO COMBATE A INCENDIO", created_at_raw: "2/4/26", finished_at_raw: "2/4/26", execution_time: "00:55", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Guilherme", base_name: "218641 - COMSEG", created_at_raw: "2/4/26", finished_at_raw: "2/5/26", execution_time: "03:03", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Marianna", base_name: "Ss Servicos & Tecnologia", created_at_raw: "2/4/26", finished_at_raw: "2/5/26", execution_time: "03:40", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Daniela", base_name: "221595 - Simples Limpeza Inteligente", created_at_raw: "2/4/26", finished_at_raw: "2/5/26", execution_time: "06:14", status_raw: "Concluido", type_raw: "Tarefas", assigned: "André" },
-  { requester_name: "Daniela", base_name: "221595 - Simples Limpeza Inteligente", created_at_raw: "2/4/26", finished_at_raw: "2/5/26", execution_time: "04:09", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Janine", base_name: "221808 - Henrique & Deyvid - Refrigeração, Lda", created_at_raw: "2/5/26", finished_at_raw: "2/5/26", execution_time: "01:05", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Silva", base_name: "221770 - Lemospassos", created_at_raw: "2/5/26", finished_at_raw: "2/6/26", execution_time: "04:36", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Thayane", base_name: "221609 - Alto Vale Empilhadeiras", created_at_raw: "2/5/26", finished_at_raw: "2/5/26", execution_time: "01:46", status_raw: "Concluido", type_raw: "Produtos/Clientes", assigned: "André" },
-  { requester_name: "Adonias", base_name: "209909 - BUCKLER GROUP LTDA", created_at_raw: "2/6/26", finished_at_raw: "2/6/26", execution_time: "01:56", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Jullia", base_name: "221736 - Visiocam", created_at_raw: "2/6/26", finished_at_raw: "2/6/26", execution_time: "01:47", status_raw: "Concluido", type_raw: "Produtos", assigned: "André" },
-  { requester_name: "Leonardo Boeira", base_name: "195409 - Otimize Climatização E Elétrica + Reativação", created_at_raw: "2/6/26", finished_at_raw: "2/9/26", execution_time: "09:45", status_raw: "Concluido", type_raw: "Cliente/Equipamentos", assigned: "André" },
-  { requester_name: "Janine", base_name: "221960 - Multi Fone", created_at_raw: "2/6/26", finished_at_raw: "2/6/26", execution_time: "05:43", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Daniela", base_name: "219256 - BREEZIFY AR-CONDICIONADO", created_at_raw: "2/6/26", finished_at_raw: "2/9/26", execution_time: "08:53", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Jullia", base_name: "219181 - Top Services", created_at_raw: "2/6/26", finished_at_raw: "06/02/2026 16:27:00", execution_time: "05:08", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Jullia", base_name: "221628 - Brbull", created_at_raw: "2/6/26", finished_at_raw: "12/02/2026 11:38:52", execution_time: "08:52", status_raw: "Concluido", type_raw: "Cliente/Equipamentos", assigned: "André" },
-  { requester_name: "Jullia", base_name: "105918 - Climatec Refrigeração", created_at_raw: "2/6/26", finished_at_raw: "2/6/26", execution_time: "04:42", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Gustavo Gomes", base_name: "211889 - Milenio", created_at_raw: "2/6/26", finished_at_raw: "09/02/2026 15:58:26", execution_time: "09:56", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "GUIlherme", base_name: "221898 - TIAGO MICHELLON CARDOSO", created_at_raw: "2/9/26", finished_at_raw: "2/9/26", execution_time: "00:54", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Daniela", base_name: "221264 - Housetech Solucoes Inteligentes", created_at_raw: "2/9/26", finished_at_raw: "2/9/26", execution_time: "01:00", status_raw: "Concluido", type_raw: "Produtos/Clientes", assigned: "André" },
-  { requester_name: "Silva", base_name: "221195 - Benit", created_at_raw: "2/9/26", finished_at_raw: "09/02/2026 11:59:17", execution_time: "01:11", status_raw: "Concluido", type_raw: "Colaboradores", assigned: "André" },
-  { requester_name: "Daniela", base_name: "222074 - BF Climatização", created_at_raw: "2/9/26", finished_at_raw: "09/02/2026 16:23:38", execution_time: "00:25", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "jullia", base_name: "219181 - Top Services", created_at_raw: "2/9/26", finished_at_raw: "", execution_time: "", status_raw: "Cancelado", type_raw: "", assigned: "André" },
-  { requester_name: "Daniela", base_name: "221595 - Simples Limpeza Inteligente", created_at_raw: "2/9/26", finished_at_raw: "09/02/2026 16:32:28", execution_time: "00:21", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "jullia", base_name: "222357 GS INSTALACOES E MANUTENCOES ELETRICAS", created_at_raw: "2/9/26", finished_at_raw: "09/02/2026 17:15:37", execution_time: "00:51", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Adonias", base_name: "202579 - SOTER CONSULTORIA AR CONDICIONADO E ELETRICA PREDIAL", created_at_raw: "2/10/26", finished_at_raw: "10/02/2026 11:00:43", execution_time: "01:09", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Marianna", base_name: "221531 - Solutionnair", created_at_raw: "2/10/26", finished_at_raw: "10/02/2026 13:55:52", execution_time: "00:20", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "QUERINO", base_name: "220485 - ELETRO E REFRIGERACAO VIVAN", created_at_raw: "2/10/26", finished_at_raw: "10/02/2026 14:12:55", execution_time: "00:33", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "QUERINO", base_name: "221835 - Elev Plus Elevadores", created_at_raw: "2/10/26", finished_at_raw: "10/02/2026 16:45:25", execution_time: "03:05", status_raw: "Concluido", type_raw: "Colaborador/Clientes/Produtos", assigned: "André" },
-  { requester_name: "QUERINO", base_name: "221847 - ATUAL ELEVADORES MANUTENCAO LIMITADA", created_at_raw: "2/10/26", finished_at_raw: "10/02/2026 17:13:16", execution_time: "03:34", status_raw: "Concluido", type_raw: "Colaborador/Clientes/Produtos", assigned: "André" },
-  { requester_name: "Adonias", base_name: "202692 - Tensoflex", created_at_raw: "2/10/26", finished_at_raw: "12/02/2026 17:30:30", execution_time: "10:17", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "GUIlherme", base_name: "221789 - Alg Comercio", created_at_raw: "2/10/26", finished_at_raw: "10/02/2026 15:04:40", execution_time: "00:55", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "querino", base_name: "218307 - Unigera Solucoes em Energia Ltda", created_at_raw: "2/10/26", finished_at_raw: "10/02/2026 16:10:16", execution_time: "01:50", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "querino", base_name: "221768 - Equipacare", created_at_raw: "2/10/26", finished_at_raw: "11/02/2026 08:20:18", execution_time: "03:07", status_raw: "Concluido", type_raw: "Outros- colocar obs", assigned: "André" },
-  { requester_name: "Silva", base_name: "221889 - Roche Serviços", created_at_raw: "2/10/26", finished_at_raw: "11/02/2026 09:52:40", execution_time: "03:55", status_raw: "Concluido", type_raw: "Cliente\\ Questionário", assigned: "André" },
-  { requester_name: "Janine", base_name: "219784 - Engepredial Engenharia de Prevencao Contra Incendio", created_at_raw: "2/10/26", finished_at_raw: "11/02/2026 14:04:18", execution_time: "07:54", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Janine", base_name: "216567 - ALT GRUAS", created_at_raw: "2/10/26", finished_at_raw: "", execution_time: "", status_raw: "Aguardando Cliente/ISM", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Silva", base_name: "222172 - ATA SERVICE", created_at_raw: "2/10/26", finished_at_raw: "11/02/2026 15:08:34", execution_time: "09:59", status_raw: "Concluido", type_raw: "Colaboradores", assigned: "André" },
-  { requester_name: "Marianna", base_name: "221475 - Grupo Os Manutencoes", created_at_raw: "2/11/26", finished_at_raw: "11/02/2026 15:53:15", execution_time: "07:53", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Guilherme", base_name: "219452 - TREMBAO", created_at_raw: "2/11/26", finished_at_raw: "11/02/2026 16:10:27", execution_time: "08:10", status_raw: "Concluido", type_raw: "Tarefas", assigned: "André" },
-  { requester_name: "Jullia", base_name: "221905 - Ponto Acústico Produções e Eventos", created_at_raw: "2/11/26", finished_at_raw: "11/02/2026 16:57:01", execution_time: "05:13", status_raw: "Concluido", type_raw: "Produtos/Clientes", assigned: "André" },
-  { requester_name: "Silva", base_name: "222422 - AGK AR CONDICIONADO", created_at_raw: "2/11/26", finished_at_raw: "12/02/2026 13:42:40", execution_time: "09:59", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Marianna", base_name: "222907 - D'graus Decor", created_at_raw: "2/11/26", finished_at_raw: "12/02/2026 15:50:20", execution_time: "09:59", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Janaina", base_name: "213641 - CLIMATEC AR CONDICION", created_at_raw: "2/12/26", finished_at_raw: "13/02/2026 10:18:09", execution_time: "05:15", status_raw: "Concluido", type_raw: "Cliente/Equipamentos", assigned: "André" },
-  { requester_name: "GUIlherme", base_name: "222665 - Lw Compressores", created_at_raw: "2/12/26", finished_at_raw: "12/02/2026 17:50:11", execution_time: "03:18", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Janaina", base_name: "218937 - Sie Engenharia", created_at_raw: "2/12/26", finished_at_raw: "13/02/2026 09:17:32", execution_time: "10:00", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Daniela", base_name: "222326 - Sw Prevencao Contra Incendio", created_at_raw: "2/12/26", finished_at_raw: "13/02/2026 09:38:34", execution_time: "02:32", status_raw: "Concluido", type_raw: "Cliente\\ Questionário", assigned: "André" },
-  { requester_name: "Adonias", base_name: "222526 - Schellin Refrigeração", created_at_raw: "2/13/26", finished_at_raw: "13/02/2026 15:16:42", execution_time: "03:52", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "GUIlherme", base_name: "221904 Fermar", created_at_raw: "2/13/26", finished_at_raw: "13/02/2026 15:08:21", execution_time: "03:19", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Jullia", base_name: "221895 - LIMPA FOSSA GUGUE XAN", created_at_raw: "2/14/26", finished_at_raw: "18/02/2026 09:52:31", execution_time: "01:52", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Jullia", base_name: "220609 - NOW QUIMICA INDUSTRIA E COMERCIO LTDA", created_at_raw: "2/17/26", finished_at_raw: "", execution_time: "", status_raw: "Aguardando Cliente/ISM", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Jullia", base_name: "220835 - Foccus Assistencia", created_at_raw: "2/17/26", finished_at_raw: "18/02/2026 10:47:48", execution_time: "02:46", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Jullia", base_name: "219181 - Top Services", created_at_raw: "2/17/26", finished_at_raw: "19/02/2026 10:51:50", execution_time: "07:37", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Jullia", base_name: "221905 - Ponto Acustico Producoes e Eventos", created_at_raw: "2/17/26", finished_at_raw: "", execution_time: "", status_raw: "Aguardando Cliente/ISM", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "GUIlherme", base_name: "222014 - Pontual Elevadores", created_at_raw: "2/18/26", finished_at_raw: "18/02/2026 11:14:23", execution_time: "03:00", status_raw: "Concluido", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Marianna", base_name: "222903 - BELTRAO COMERCIO DE REFRIGERACAO", created_at_raw: "2/18/26", finished_at_raw: "18/02/2026 13:56:03", execution_time: "04:20", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "querino", base_name: "220914 - Mpr Eletronica de Potencia", created_at_raw: "2/18/26", finished_at_raw: "18/02/2026 14:06:17", execution_time: "03:29", status_raw: "Concluido", type_raw: "Colaboradores/Clientes", assigned: "André" },
-  { requester_name: "Silva", base_name: "186063 - Agesp", created_at_raw: "2/18/26", finished_at_raw: "19/02/2026 10:03:30", execution_time: "09:25", status_raw: "Concluido", type_raw: "Outros- colocar obs", assigned: "André" },
-  { requester_name: "Daniela", base_name: "223025 - Vert Service", created_at_raw: "2/18/26", finished_at_raw: "18/02/2026 15:57:58", execution_time: "04:46", status_raw: "Concluido", type_raw: "Produto/Questionário", assigned: "André" },
-  { requester_name: "Jullia", base_name: "223003 - Tecnofrio Gravatai", created_at_raw: "2/18/26", finished_at_raw: "19/02/2026 14:41:32", execution_time: "16:41", status_raw: "Concluido", type_raw: "Equipamentos/Questionarios", assigned: "André" },
-  { requester_name: "querino", base_name: "218307 - Unigera Solucoes em Energia Ltda", created_at_raw: "2/18/26", finished_at_raw: "18/02/2026 14:20:57", execution_time: "00:56", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "GUIlherme", base_name: "223235 - LOXAM DO BRASIL", created_at_raw: "2/18/26", finished_at_raw: "19/02/2026 15:39:41", execution_time: "10:32", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Janaina", base_name: "218937 - Sie Engenharia", created_at_raw: "2/18/26", finished_at_raw: "19/02/2026 16:39:02", execution_time: "09:41", status_raw: "Concluido", type_raw: "Quest/pmoc", assigned: "André" },
-  { requester_name: "Janaina", base_name: "218938 - Sie Engenharia", created_at_raw: "2/18/26", finished_at_raw: "19/02/2026 16:39:06", execution_time: "09:59", status_raw: "Concluido", type_raw: "Cliente/Equipamentos", assigned: "André" },
-  { requester_name: "Janine", base_name: "221886 - Renovagas", created_at_raw: "2/18/26", finished_at_raw: "20/02/2026 09:22:48", execution_time: "11:22", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Jullia", base_name: "223003 - Tecnofrio Gravatai", created_at_raw: "2/19/26", finished_at_raw: "20/02/2026 10:03:52", execution_time: "11:13", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Marianna", base_name: "222845 - Inovabrus Refrigeracao", created_at_raw: "2/19/26", finished_at_raw: "20/02/2026 10:26:50", execution_time: "11:17", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Silva", base_name: "215291 - COOL SEED", created_at_raw: "2/19/26", finished_at_raw: "20/02/2026 11:50:27", execution_time: "11:56", status_raw: "Concluido", type_raw: "Colaboradores/Clientes", assigned: "André" },
-  { requester_name: "querino", base_name: "218497 - Duarte Cranes Equipamentos de Elevacao de Cargas", created_at_raw: "2/19/26", finished_at_raw: "23/02/2026 08:04:56", execution_time: "13:33", status_raw: "Concluido", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "QUERINO", base_name: "220235 - CN Servicos", created_at_raw: "2/19/26", finished_at_raw: "", execution_time: "", status_raw: "Em andamento", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Marianna", base_name: "222220 - Intrepid Industrial Importadora", created_at_raw: "2/19/26", finished_at_raw: "20/02/2026 17:50:49", execution_time: "11:33", status_raw: "Concluido", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Thayane", base_name: "223028 - M5 Servicos", created_at_raw: "2/19/26", finished_at_raw: "", execution_time: "", status_raw: "Em andamento", type_raw: "Cliente", assigned: "André" },
-  { requester_name: "Jullia", base_name: "223256 - BERNOULLI SISTEMAS DE CLIMATIZACAO", created_at_raw: "2/19/26", finished_at_raw: "", execution_time: "", status_raw: "Não iniciado", type_raw: "Equipamento", assigned: "André" },
-  { requester_name: "Jullia", base_name: "223467 - AD TEC FACILITIES", created_at_raw: "2/19/26", finished_at_raw: "", execution_time: "", status_raw: "Não iniciado", type_raw: "Questionários", assigned: "André" },
-  { requester_name: "Guilherme", base_name: "223235 - LOXAM DO BRASIL", created_at_raw: "2/20/26", finished_at_raw: "20/02/2026 10:16:54", execution_time: "00:28", status_raw: "Concluido", type_raw: "Equipamento", assigned: "" },
-];
+interface ValidationResult {
+  valid: boolean;
+  rows: ParsedRow[];
+  errors: string[];
+  warnings: string[];
+  columnMapping: Record<string, number>;
+  unmappedColumns: string[];
+  sheetName: string;
+}
+
+function validateAndParseFile(workbook: XLSX.WorkBook): ValidationResult {
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const rawData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (rawData.length === 0) {
+    return { valid: false, rows: [], errors: ['Planilha vazia - nenhuma linha encontrada.'], warnings: [], columnMapping: {}, unmappedColumns: [], sheetName };
+  }
+
+  // Map columns
+  const headers = Object.keys(rawData[0]);
+  const columnMapping: Record<string, number> = {};
+  const unmappedColumns: string[] = [];
+  const mappedHeaders: Record<string, string> = {};
+
+  headers.forEach((h, i) => {
+    const match = matchColumn(h);
+    if (match) {
+      columnMapping[match] = i;
+      mappedHeaders[match] = h;
+    } else {
+      unmappedColumns.push(h);
+    }
+  });
+
+  // Check required columns
+  const requiredCols = ['solicitante', 'base', 'status'];
+  const missingRequired = requiredCols.filter(c => !(c in columnMapping));
+  if (missingRequired.length > 0) {
+    errors.push(`Colunas obrigatórias não encontradas: ${missingRequired.join(', ')}`);
+    errors.push(`Colunas esperadas: ${EXPECTED_COLUMNS.join(', ')}`);
+    errors.push(`Colunas encontradas: ${headers.join(', ')}`);
+    return { valid: false, rows: [], errors, warnings, columnMapping, unmappedColumns, sheetName };
+  }
+
+  const optionalMissing = EXPECTED_COLUMNS.filter(c => !requiredCols.includes(c) && !(c in columnMapping));
+  if (optionalMissing.length > 0) {
+    warnings.push(`Colunas opcionais não encontradas: ${optionalMissing.join(', ')}. Valores padrão serão usados.`);
+  }
+
+  if (unmappedColumns.length > 0) {
+    warnings.push(`Colunas ignoradas: ${unmappedColumns.join(', ')}`);
+  }
+
+  // Parse rows
+  const rows: ParsedRow[] = [];
+  rawData.forEach((row, idx) => {
+    const getValue = (col: string): string => {
+      const header = mappedHeaders[col];
+      if (!header) return '';
+      const val = row[header];
+      return val !== undefined && val !== null ? String(val).trim() : '';
+    };
+    const getRawValue = (col: string): string | number => {
+      const header = mappedHeaders[col];
+      if (!header) return '';
+      const val = row[header];
+      if (val === undefined || val === null) return '';
+      return typeof val === 'number' ? val : String(val).trim();
+    };
+
+    const solicitante = getValue('solicitante');
+    const base = getValue('base');
+    const status = getValue('status');
+
+    if (!solicitante && !base) {
+      // Skip empty rows silently
+      return;
+    }
+
+    if (!solicitante) {
+      warnings.push(`Linha ${idx + 2}: Solicitante vazio, usando "Desconhecido"`);
+    }
+    if (!base) {
+      errors.push(`Linha ${idx + 2}: Nome da base é obrigatório`);
+      return;
+    }
+
+    rows.push({
+      requester_name: solicitante || 'Desconhecido',
+      base_name: base,
+      created_at_raw: getRawValue('data criação'),
+      finished_at_raw: getRawValue('data conclusão'),
+      execution_time: getValue('tempo execução'),
+      status_raw: status || 'Não iniciado',
+      type_raw: getValue('tipo') || 'outro',
+      assigned: getValue('responsável'),
+    });
+  });
+
+  if (rows.length === 0) {
+    errors.push('Nenhuma linha válida encontrada na planilha.');
+  }
+
+  return {
+    valid: errors.length === 0,
+    rows,
+    errors,
+    warnings,
+    columnMapping,
+    unmappedColumns,
+    sheetName,
+  };
+}
 
 const BulkImport: React.FC = () => {
+  const [file, setFile] = useState<File | null>(null);
+  const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [imported, setImported] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<{ successCount: number; errorCount: number; errors: string[] } | null>(null);
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const processedData = RAW_DATA.map((r) => ({
-    requester_name: r.requester_name,
-    base_name: r.base_name,
-    created_at: parseDate(r.created_at_raw),
-    finished_at: parseDate(r.finished_at_raw),
-    execution_time: r.execution_time,
-    status: mapStatus(r.status_raw),
-    type: mapType(r.type_raw || "outro"),
-    assigned_analyst_id: r.assigned ? ANDRE_ID : null,
-  }));
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0];
+    if (!selected) return;
+
+    const ext = selected.name.split('.').pop()?.toLowerCase();
+    if (!['xlsx', 'xls', 'csv'].includes(ext || '')) {
+      toast({ title: 'Formato inválido', description: 'Use arquivos .xlsx, .xls ou .csv', variant: 'destructive' });
+      return;
+    }
+
+    if (selected.size > 10 * 1024 * 1024) {
+      toast({ title: 'Arquivo muito grande', description: 'Máximo 10MB', variant: 'destructive' });
+      return;
+    }
+
+    setFile(selected);
+    setResult(null);
+    setValidation(null);
+
+    try {
+      const buffer = await selected.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+      const result = validateAndParseFile(workbook);
+      setValidation(result);
+    } catch (err) {
+      toast({ title: 'Erro ao ler arquivo', description: (err as Error).message, variant: 'destructive' });
+      setFile(null);
+    }
+
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const clearFile = () => {
+    setFile(null);
+    setValidation(null);
+    setResult(null);
+  };
 
   const handleDeleteAll = async () => {
     setDeleting(true);
@@ -214,7 +316,6 @@ const BulkImport: React.FC = () => {
         title: "Registros excluídos",
         description: `${data.deletedCount} tickets importados foram removidos.`,
       });
-      setImported(false);
       setResult(null);
     } catch (err) {
       toast({ title: "Erro", description: (err as Error).message, variant: "destructive" });
@@ -224,15 +325,23 @@ const BulkImport: React.FC = () => {
   };
 
   const handleImport = async () => {
-    if (imported) {
-      toast({ title: "Importação já realizada", description: "Os dados já foram importados.", variant: "destructive" });
-      return;
-    }
+    if (!validation || !validation.valid || validation.rows.length === 0) return;
 
     setImporting(true);
     setProgress(10);
 
     try {
+      const processedData = validation.rows.map((r) => ({
+        requester_name: r.requester_name,
+        base_name: r.base_name,
+        created_at: parseDate(r.created_at_raw),
+        finished_at: parseDate(r.finished_at_raw),
+        execution_time: r.execution_time,
+        status: mapStatus(r.status_raw),
+        type: mapType(r.type_raw || "outro"),
+        assigned_analyst_id: r.assigned ? ANDRE_ID : null,
+      }));
+
       const batchSize = 20;
       const batches = [];
       for (let i = 0; i < processedData.length; i += batchSize) {
@@ -262,11 +371,10 @@ const BulkImport: React.FC = () => {
 
       setProgress(100);
       setResult({ successCount: totalSuccess, errorCount: totalError, errors: allErrors });
-      setImported(true);
 
       toast({
         title: "Importação concluída",
-        description: `${totalSuccess} tickets importados com sucesso. ${totalError} erros.`,
+        description: `${totalSuccess} tickets importados. ${totalError} erros.`,
       });
     } catch (err) {
       toast({ title: "Erro na importação", description: (err as Error).message, variant: "destructive" });
@@ -275,64 +383,183 @@ const BulkImport: React.FC = () => {
     }
   };
 
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Solicitante', 'Base', 'Data Criação', 'Data Conclusão', 'Tempo Execução', 'Status', 'Tipo', 'Responsável'],
+      ['João', '123456 - Empresa Exemplo', '01/03/2026', '02/03/2026', '02:30', 'Concluido', 'Cliente', 'André'],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Importação');
+    XLSX.writeFile(wb, 'modelo_importacao.xlsx');
+  };
+
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Importação em Massa - Fevereiro 2026</h1>
-          <p className="text-muted-foreground">Importar {RAW_DATA.length} registros da planilha para o sistema</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Importação em Massa</h1>
+            <p className="text-muted-foreground">Envie uma planilha para importar tickets no sistema</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={downloadTemplate}>
+            <Download className="h-4 w-4 mr-2" />
+            Modelo
+          </Button>
         </div>
 
+        {/* File Upload */}
         <Card>
           <CardHeader>
-            <CardTitle>Resumo dos Dados</CardTitle>
-            <CardDescription>Dados extraídos da aba "Fevereiro2026" da planilha</CardDescription>
+            <CardTitle>1. Enviar Planilha</CardTitle>
+            <CardDescription>
+              Formatos aceitos: .xlsx, .xls, .csv — Colunas obrigatórias: Solicitante, Base, Status
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center p-3 rounded-lg bg-muted">
-                <div className="text-2xl font-bold">{RAW_DATA.length}</div>
-                <div className="text-xs text-muted-foreground">Total</div>
+          <CardContent>
+            {!file ? (
+              <div
+                className="flex flex-col items-center justify-center gap-3 cursor-pointer rounded-lg border-2 border-dashed p-8 border-border bg-muted/30 hover:border-primary/40 transition-colors"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <FileSpreadsheet className="h-10 w-10 text-muted-foreground" />
+                <div className="text-center">
+                  <p className="text-sm font-medium">Clique para selecionar um arquivo</p>
+                  <p className="text-xs text-muted-foreground mt-1">ou arraste e solte aqui</p>
+                </div>
               </div>
-              <div className="text-center p-3 rounded-lg bg-muted">
-                <div className="text-2xl font-bold">{RAW_DATA.filter(r => mapStatus(r.status_raw) === 'finalizado').length}</div>
-                <div className="text-xs text-muted-foreground">Finalizados</div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-lg border p-3 border-border">
+                <FileSpreadsheet className="h-5 w-5 text-primary shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{file.name}</p>
+                  <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</p>
+                </div>
+                <Button variant="ghost" size="icon" onClick={clearFile} className="shrink-0">
+                  <X className="h-4 w-4" />
+                </Button>
               </div>
-              <div className="text-center p-3 rounded-lg bg-muted">
-                <div className="text-2xl font-bold">{RAW_DATA.filter(r => mapStatus(r.status_raw) === 'pausado').length}</div>
-                <div className="text-xs text-muted-foreground">Pausados</div>
-              </div>
-              <div className="text-center p-3 rounded-lg bg-muted">
-                <div className="text-2xl font-bold">{RAW_DATA.filter(r => ['em_andamento', 'nao_iniciado'].includes(mapStatus(r.status_raw))).length}</div>
-                <div className="text-xs text-muted-foreground">Em aberto</div>
-              </div>
-            </div>
-
-            <div className="max-h-64 overflow-y-auto border rounded-lg">
-              <table className="w-full text-xs">
-                <thead className="bg-muted sticky top-0">
-                  <tr>
-                    <th className="text-left p-2">Solicitante</th>
-                    <th className="text-left p-2">Base</th>
-                    <th className="text-left p-2">Tipo</th>
-                    <th className="text-left p-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {RAW_DATA.map((r, i) => (
-                    <tr key={i} className="border-t">
-                      <td className="p-2">{r.requester_name}</td>
-                      <td className="p-2 max-w-[200px] truncate">{r.base_name}</td>
-                      <td className="p-2"><Badge variant="outline" className="text-[10px]">{mapType(r.type_raw || "outro")}</Badge></td>
-                      <td className="p-2"><Badge variant="secondary" className="text-[10px]">{mapStatus(r.status_raw)}</Badge></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
           </CardContent>
         </Card>
 
+        {/* Validation Results */}
+        {validation && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                2. Validação
+                {validation.valid ? (
+                  <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+                    <CheckCircle className="h-3 w-3 mr-1" /> OK
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive">
+                    <AlertCircle className="h-3 w-3 mr-1" /> Erros
+                  </Badge>
+                )}
+              </CardTitle>
+              <CardDescription>
+                Aba: "{validation.sheetName}" — {validation.rows.length} linhas válidas encontradas
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Errors */}
+              {validation.errors.length > 0 && (
+                <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 space-y-1">
+                  <p className="text-sm font-medium text-destructive">Erros ({validation.errors.length})</p>
+                  {validation.errors.map((e, i) => (
+                    <p key={i} className="text-xs text-destructive/80">{e}</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Warnings */}
+              {validation.warnings.length > 0 && (
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 space-y-1">
+                  <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">Avisos ({validation.warnings.length})</p>
+                  {validation.warnings.map((w, i) => (
+                    <p key={i} className="text-xs text-yellow-600/80 dark:text-yellow-400/80">{w}</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Column Mapping */}
+              <div>
+                <p className="text-sm font-medium mb-2">Mapeamento de colunas:</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(validation.columnMapping).map(([key]) => (
+                    <Badge key={key} variant="secondary" className="text-xs">
+                      <CheckCircle className="h-3 w-3 mr-1 text-emerald-500" />
+                      {key}
+                    </Badge>
+                  ))}
+                  {EXPECTED_COLUMNS.filter(c => !(c in validation.columnMapping)).map(key => (
+                    <Badge key={key} variant="outline" className="text-xs text-muted-foreground">
+                      <X className="h-3 w-3 mr-1" />
+                      {key}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              {/* Preview Table */}
+              {validation.rows.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-2">Pré-visualização ({Math.min(validation.rows.length, 10)} de {validation.rows.length}):</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                    <div className="text-center p-2 rounded-lg bg-muted">
+                      <div className="text-lg font-bold">{validation.rows.length}</div>
+                      <div className="text-xs text-muted-foreground">Total</div>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-muted">
+                      <div className="text-lg font-bold">{validation.rows.filter(r => mapStatus(r.status_raw) === 'finalizado').length}</div>
+                      <div className="text-xs text-muted-foreground">Finalizados</div>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-muted">
+                      <div className="text-lg font-bold">{validation.rows.filter(r => mapStatus(r.status_raw) === 'pausado').length}</div>
+                      <div className="text-xs text-muted-foreground">Pausados</div>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-muted">
+                      <div className="text-lg font-bold">{validation.rows.filter(r => ['em_andamento', 'nao_iniciado'].includes(mapStatus(r.status_raw))).length}</div>
+                      <div className="text-xs text-muted-foreground">Em aberto</div>
+                    </div>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto border rounded-lg">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted sticky top-0">
+                        <tr>
+                          <th className="text-left p-2">Solicitante</th>
+                          <th className="text-left p-2">Base</th>
+                          <th className="text-left p-2">Tipo</th>
+                          <th className="text-left p-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {validation.rows.slice(0, 10).map((r, i) => (
+                          <tr key={i} className="border-t">
+                            <td className="p-2">{r.requester_name}</td>
+                            <td className="p-2 max-w-[200px] truncate">{r.base_name}</td>
+                            <td className="p-2"><Badge variant="outline" className="text-[10px]">{mapType(r.type_raw)}</Badge></td>
+                            <td className="p-2"><Badge variant="secondary" className="text-[10px]">{mapStatus(r.status_raw)}</Badge></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Progress */}
         {importing && (
           <Card>
             <CardContent className="py-6">
@@ -347,12 +574,13 @@ const BulkImport: React.FC = () => {
           </Card>
         )}
 
+        {/* Result */}
         {result && (
           <Card>
             <CardContent className="py-6 space-y-3">
               <div className="flex items-center gap-2">
-              {result.errorCount === 0 ? (
-                  <CheckCircle className="h-5 w-5 text-primary" />
+                {result.errorCount === 0 ? (
+                  <CheckCircle className="h-5 w-5 text-emerald-500" />
                 ) : (
                   <AlertCircle className="h-5 w-5 text-destructive" />
                 )}
@@ -371,26 +599,23 @@ const BulkImport: React.FC = () => {
           </Card>
         )}
 
+        {/* Actions */}
         <div className="flex gap-3">
           <Button
             onClick={handleImport}
-            disabled={importing || imported || deleting}
+            disabled={importing || deleting || !validation?.valid || validation?.rows.length === 0}
             className="flex-1"
             size="lg"
           >
             <Upload className="h-4 w-4 mr-2" />
-            {imported ? 'Importação Concluída' : importing ? 'Importando...' : `Importar ${RAW_DATA.length} Registros`}
+            {importing ? 'Importando...' : `Importar ${validation?.rows.length || 0} Registros`}
           </Button>
 
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button
-                variant="destructive"
-                size="lg"
-                disabled={importing || deleting}
-              >
+              <Button variant="destructive" size="lg" disabled={importing || deleting}>
                 <Trash2 className="h-4 w-4 mr-2" />
-                {deleting ? 'Excluindo...' : 'Excluir Todos'}
+                {deleting ? 'Excluindo...' : 'Excluir Importados'}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
