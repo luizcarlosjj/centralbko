@@ -31,26 +31,34 @@ const EXPECTED_COLUMNS = [
   'base',
   'data criação',
   'data conclusão',
+  'hora abertura',
+  'hora encerramento',
   'tempo execução',
   'status',
   'tipo',
   'responsável',
   'nível do setup',
   'time',
+  'prioridade',
+  'descrição',
 ];
 
 // Alternative accepted column names
 const COLUMN_ALIASES: Record<string, string[]> = {
   solicitante: ['solicitante', 'requester', 'nome solicitante'],
   base: ['base', 'base_name', 'nome da base', 'nome base'],
-  'data criação': ['data criação', 'data criacao', 'criação', 'criacao', 'created', 'data abertura', 'abertura'],
+  'data criação': ['data criação', 'data criacao', 'criação', 'criacao', 'created', 'data abertura'],
   'data conclusão': ['data conclusão', 'data conclusao', 'conclusão', 'conclusao', 'finished', 'data finalização', 'finalização'],
+  'hora abertura': ['hora abertura', 'hora inicio', 'hora início', 'hora criação', 'hora criacao'],
+  'hora encerramento': ['hora encerramento', 'hora fim', 'hora conclusão', 'hora conclusao', 'hora finalização'],
   'tempo execução': ['tempo execução', 'tempo execucao', 'tempo', 'execution_time', 'tempo util'],
   status: ['status', 'situação', 'situacao'],
   tipo: ['tipo', 'type', 'categoria'],
   'responsável': ['responsável', 'responsavel', 'assigned', 'backoffice', 'analista'],
   'nível do setup': ['nível do setup', 'nivel do setup', 'nível setup', 'nivel setup', 'setup level', 'setup'],
   'time': ['time', 'team', 'equipe'],
+  'prioridade': ['prioridade', 'priority'],
+  'descrição': ['descrição', 'descricao', 'description', 'observação', 'observacao', 'obs'],
 };
 
 function normalizeHeader(h: string): string {
@@ -65,12 +73,41 @@ function matchColumn(header: string): string | null {
   return null;
 }
 
-function mapType(raw: string): string {
+// Dynamic type mapping based on registered ticket_types
+function mapType(raw: string, registeredTypes: { value: string; label: string }[]): string {
   const r = raw.toLowerCase().trim();
-  if (/quest|pmoc/.test(r)) return "setup_questionario";
-  if (/cliente|colaborador|fornecedor/.test(r)) return "cliente";
-  if (/equipamento|produto/.test(r)) return "ajuste";
+  if (!r) return "outro";
+  
+  // Try exact match on value or label
+  const exactMatch = registeredTypes.find(t => 
+    t.value.toLowerCase() === r || t.label.toLowerCase() === r
+  );
+  if (exactMatch) return exactMatch.value;
+
+  // Try partial match on label
+  const partialMatch = registeredTypes.find(t => 
+    r.includes(t.label.toLowerCase()) || t.label.toLowerCase().includes(r)
+  );
+  if (partialMatch) return partialMatch.value;
+
+  // Keyword-based fallback
+  if (/quest|pmoc/.test(r)) return registeredTypes.find(t => t.value === 'setup_questionario')?.value || "setup_questionario";
+  if (/tarefa/.test(r)) return registeredTypes.find(t => t.value === 'tarefas')?.value || "tarefas";
+  if (/produto/.test(r)) return registeredTypes.find(t => t.value === 'produtos')?.value || "produtos";
+  if (/equipamento/.test(r)) return registeredTypes.find(t => t.value === 'equipamento')?.value || "equipamento";
+  if (/colaborador/.test(r)) return registeredTypes.find(t => t.value === 'colaborador_clientes_produtos')?.value || "outro";
+  if (/cliente|fornecedor/.test(r)) return registeredTypes.find(t => t.value === 'cliente')?.value || "cliente";
+  if (/servi/.test(r)) return registeredTypes.find(t => t.value === 'servico')?.value || "servico";
+  if (/ajust/.test(r)) return registeredTypes.find(t => t.value === 'ajuste')?.value || "ajuste";
   return "outro";
+}
+
+function mapPriority(raw: string): string {
+  const r = raw.toLowerCase().trim();
+  if (r.includes('urgente')) return 'urgente';
+  if (r.includes('alta')) return 'alta';
+  if (r.includes('baixa')) return 'baixa';
+  return 'media';
 }
 
 function mapStatus(raw: string): string {
@@ -135,12 +172,16 @@ interface ParsedRow {
   base_name: string;
   created_at_raw: string | number;
   finished_at_raw: string | number;
+  hora_abertura: string;
+  hora_encerramento: string;
   execution_time: string;
   status_raw: string;
   type_raw: string;
   assigned: string;
   setup_level: string;
   team: string;
+  priority_raw: string;
+  description: string;
 }
 
 interface ValidationResult {
@@ -239,12 +280,16 @@ function validateAndParseFile(workbook: XLSX.WorkBook): ValidationResult {
       base_name: base,
       created_at_raw: getRawValue('data criação'),
       finished_at_raw: getRawValue('data conclusão'),
+      hora_abertura: getValue('hora abertura'),
+      hora_encerramento: getValue('hora encerramento'),
       execution_time: getValue('tempo execução'),
       status_raw: status || 'Não iniciado',
       type_raw: getValue('tipo') || 'outro',
       assigned: getValue('responsável'),
       setup_level: getValue('nível do setup'),
       team: getValue('time'),
+      priority_raw: getValue('prioridade'),
+      description: getValue('descrição'),
     });
   });
 
@@ -273,10 +318,12 @@ const BulkImport: React.FC = () => {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<{ successCount: number; errorCount: number; errors: string[] } | null>(null);
   const [backofficeUsers, setBackofficeUsers] = useState<BackofficeUser[]>([]);
+  const [registeredTypes, setRegisteredTypes] = useState<{ value: string; label: string }[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
-    const fetchBackofficeUsers = async () => {
+    const fetchData = async () => {
+      // Fetch backoffice users
       const { data: roles } = await supabase
         .from('user_roles')
         .select('user_id')
@@ -291,8 +338,11 @@ const BulkImport: React.FC = () => {
           setBackofficeUsers(profiles.map(p => ({ id: p.id, name: p.name })));
         }
       }
+      // Fetch ticket types
+      const { data: types } = await supabase.from('ticket_types').select('value, label').eq('active', true);
+      if (types) setRegisteredTypes(types);
     };
-    fetchBackofficeUsers();
+    fetchData();
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -373,17 +423,33 @@ const BulkImport: React.FC = () => {
         return match ? match.id : null;
       };
 
+      // Helper to combine date + time
+      const combineDateAndTime = (dateRaw: string | number, timeStr: string): string | null => {
+        const dateOnly = parseDate(dateRaw);
+        if (!dateOnly) return null;
+        if (!timeStr) return dateOnly;
+        // timeStr format: HH:MM:SS or HH:MM
+        const timeMatch = timeStr.match(/^(\d{1,2}):(\d{2}):?(\d{2})?$/);
+        if (timeMatch) {
+          const [, h, m, s] = timeMatch;
+          return dateOnly.slice(0, 11) + `${h.padStart(2, '0')}:${m}:${s || '00'}`;
+        }
+        return dateOnly;
+      };
+
       const processedData = validation.rows.map((r) => ({
         requester_name: r.requester_name,
         base_name: r.base_name,
-        created_at: parseDate(r.created_at_raw),
-        finished_at: parseDate(r.finished_at_raw),
+        created_at: combineDateAndTime(r.created_at_raw, r.hora_abertura),
+        finished_at: combineDateAndTime(r.finished_at_raw, r.hora_encerramento),
         execution_time: r.execution_time,
         status: mapStatus(r.status_raw),
-        type: mapType(r.type_raw || "outro"),
+        type: mapType(r.type_raw || "outro", registeredTypes),
         assigned_analyst_id: findUserId(r.assigned),
         setup_level: r.setup_level || null,
         team: r.team || null,
+        priority: mapPriority(r.priority_raw),
+        description: r.description || null,
       }));
 
       const batchSize = 20;
@@ -763,7 +829,7 @@ const BulkImport: React.FC = () => {
                           <tr key={i} className="border-t">
                             <td className="p-2">{r.requester_name}</td>
                             <td className="p-2 max-w-[200px] truncate">{r.base_name}</td>
-                            <td className="p-2"><Badge variant="outline" className="text-[10px]">{mapType(r.type_raw)}</Badge></td>
+                            <td className="p-2"><Badge variant="outline" className="text-[10px]">{mapType(r.type_raw, registeredTypes)}</Badge></td>
                             <td className="p-2"><Badge variant="secondary" className="text-[10px]">{mapStatus(r.status_raw)}</Badge></td>
                             <td className="p-2">
                               {r.assigned && r.assigned.toLowerCase().trim() !== 'não atribuído' && r.assigned.toLowerCase().trim() !== 'nao atribuido'
