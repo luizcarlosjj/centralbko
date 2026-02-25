@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { calculateBusinessSeconds } from '@/lib/business-time';
+
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -80,9 +80,7 @@ const MetricsDashboard = () => {
   // Meta 48h: finalizados em até 48h úteis / total finalizados
   const FORTY_EIGHT_HOURS_BIZ = 63360; // 2 dias úteis = 17h36min
   const finishedWithin48h = finishedTickets.filter(t => {
-    if (!t.finished_at) return false;
-    const bizSecs = calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at));
-    return bizSecs <= FORTY_EIGHT_HOURS_BIZ;
+    return (t.total_execution_seconds || 0) <= FORTY_EIGHT_HOURS_BIZ;
   }).length;
   const meta48hRate = finished > 0 ? ((finishedWithin48h / finished) * 100).toFixed(1) : '0.0';
 
@@ -116,8 +114,7 @@ const MetricsDashboard = () => {
         ? Math.round(finishedByUser.reduce((s, t) => s + (t.total_paused_seconds || 0), 0) / finishedByUser.length)
         : 0;
       const within48h = finishedByUser.filter(t => {
-        if (!t.finished_at) return false;
-        return calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at)) <= FORTY_EIGHT_HOURS_BIZ;
+        return (t.total_execution_seconds || 0) <= FORTY_EIGHT_HOURS_BIZ;
       }).length;
       const meta48h = finishedByUser.length > 0 ? Math.round((within48h / finishedByUser.length) * 100) : 0;
       return {
@@ -311,12 +308,6 @@ const MetricsDashboard = () => {
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-foreground truncate">{b.name}</p>
                       <p className="text-xs text-muted-foreground">{b.total} chamados atribuídos</p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-lg font-bold ${b.meta48h >= 80 ? 'text-success' : b.meta48h >= 50 ? 'text-warning' : 'text-destructive'}`}>
-                        {b.meta48h}%
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">Meta 48h</p>
                     </div>
                   </div>
 
