@@ -2,7 +2,7 @@
  * Business time calculator for Brazilian business hours.
  * 
  * Rules:
- * - Monday to Sunday: 08:00 - 18:00
+ * - Monday to Sunday: 08:00 - 18:00 (BRT / UTC-3)
  * - Lunch break: 12:00 - 13:12
  * - Useful time per day: 8h48min = 31,680 seconds
  * - Excludes Brazilian national holidays
@@ -20,6 +20,30 @@ const WORK_START = WORK_START_HOUR * 60;
 const WORK_END = WORK_END_HOUR * 60;
 const LUNCH_START = LUNCH_START_HOUR * 60 + LUNCH_START_MIN;
 const LUNCH_END = LUNCH_END_HOUR * 60 + LUNCH_END_MIN;
+
+// Brazil UTC-3 offset in milliseconds
+const BRAZIL_OFFSET_MS = -3 * 60 * 60 * 1000;
+
+/**
+ * Convert a UTC Date to a pseudo-local Date representing Brazilian time.
+ * The returned Date's getHours/getMinutes etc. will return BRT values
+ * regardless of the runtime's timezone.
+ */
+function toBrazilTime(utcDate: Date): Date {
+  // getTime() gives UTC ms. We shift by -3h so that
+  // UTC-based getHours() returns the BRT hour.
+  const utcMs = utcDate.getTime();
+  const brazilMs = utcMs + BRAZIL_OFFSET_MS;
+  // Create a new date using UTC constructor so getUTC* matches BRT
+  const d = new Date(brazilMs);
+  // We need getHours() to return BRT. In browser (BRT timezone) this already works.
+  // But to be safe across environments, we use a workaround:
+  // Return a date whose UTC time equals the BRT time.
+  return new Date(Date.UTC(
+    d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(),
+    d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds()
+  ));
+}
 
 /**
  * Calculate Easter date using the Anonymous Gregorian algorithm
@@ -73,8 +97,8 @@ function getHolidays(year: number): Set<string> {
   
   // Mobile holidays based on Easter
   const easter = getEasterDate(year);
-  const carnival1 = addDays(easter, -49); // Monday
-  const carnival2 = addDays(easter, -48); // Tuesday (Carnaval)
+  const carnival1 = addDays(easter, -48); // Monday (Carnaval)
+  const carnival2 = addDays(easter, -47); // Tuesday (Carnaval)
   const goodFriday = addDays(easter, -2);
   const corpusChristi = addDays(easter, 60);
   
@@ -98,11 +122,15 @@ function isHoliday(date: Date): boolean {
 }
 
 /**
- * Calculate business seconds between two dates.
- * Only counts time within business hours (08:00-18:00),
+ * Calculate business seconds between two dates (UTC).
+ * Converts to Brazilian time (UTC-3) internally.
+ * Only counts time within business hours (08:00-18:00 BRT),
  * excluding lunch (12:00-13:12) and holidays.
  */
-export function calculateBusinessSeconds(start: Date, end: Date): number {
+export function calculateBusinessSeconds(startUtc: Date, endUtc: Date): number {
+  const start = toBrazilTime(startUtc);
+  const end = toBrazilTime(endUtc);
+
   if (end <= start) return 0;
 
   let totalSeconds = 0;
