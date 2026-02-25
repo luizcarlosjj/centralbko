@@ -265,6 +265,66 @@ export type Database = {
         }
         Relationships: []
       }
+      setup_levels: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string
+          description: string | null
+          id: string
+          label: string
+          value: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by: string
+          description?: string | null
+          id?: string
+          label: string
+          value: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string
+          description?: string | null
+          id?: string
+          label?: string
+          value?: string
+        }
+        Relationships: []
+      }
+      teams: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string
+          description: string | null
+          id: string
+          label: string
+          value: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by: string
+          description?: string | null
+          id?: string
+          label: string
+          value: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string
+          description?: string | null
+          id?: string
+          label?: string
+          value?: string
+        }
+        Relationships: []
+      }
       ticket_status_logs: {
         Row: {
           changed_at: string
@@ -343,8 +403,10 @@ export type Database = {
           priority: string
           requester_name: string
           requester_user_id: string | null
+          setup_level: string | null
           started_at: string | null
           status: string
+          team: string | null
           total_execution_seconds: number
           total_paused_seconds: number
           type: string
@@ -361,8 +423,10 @@ export type Database = {
           priority: string
           requester_name: string
           requester_user_id?: string | null
+          setup_level?: string | null
           started_at?: string | null
           status?: string
+          team?: string | null
           total_execution_seconds?: number
           total_paused_seconds?: number
           type: string
@@ -379,8 +443,10 @@ export type Database = {
           priority?: string
           requester_name?: string
           requester_user_id?: string | null
+          setup_level?: string | null
           started_at?: string | null
           status?: string
+          team?: string | null
           total_execution_seconds?: number
           total_paused_seconds?: number
           type?: string

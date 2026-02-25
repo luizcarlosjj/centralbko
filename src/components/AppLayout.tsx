@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { LogOut, LayoutDashboard, BarChart3, Users, Headphones, PauseCircle, PlusCircle, UserPlus, FileType } from 'lucide-react';
+import { LogOut, LayoutDashboard, BarChart3, Users, Headphones, PauseCircle, PlusCircle, UserPlus, FileType, Layers, UsersRound } from 'lucide-react';
 import NotificationBell from '@/components/NotificationBell';
 import ThemeToggle from '@/components/ThemeToggle';
 import { NavLink } from '@/components/NavLink';
@@ -31,6 +31,8 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           { title: 'Usuários', url: '/users', icon: Users },
           { title: 'Motivos de Pausa', url: '/pause-reasons', icon: PauseCircle },
           { title: 'Tipos de Solicitação', url: '/ticket-types', icon: FileType },
+          { title: 'Níveis de Setup', url: '/setup-levels', icon: Layers },
+          { title: 'Times', url: '/teams', icon: UsersRound },
           { title: 'Solicitantes', url: '/requesters', icon: UserPlus },
         ]
       : []),

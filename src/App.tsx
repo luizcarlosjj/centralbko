@@ -19,6 +19,8 @@ const PublicTicketForm = React.lazy(() => import("@/pages/PublicTicketForm"));
 const RequesterManagement = React.lazy(() => import("@/pages/RequesterManagement"));
 const BulkImport = React.lazy(() => import("@/pages/BulkImport"));
 const TicketTypes = React.lazy(() => import("@/pages/TicketTypes"));
+const SetupLevels = React.lazy(() => import("@/pages/SetupLevels"));
+const Teams = React.lazy(() => import("@/pages/Teams"));
 const PublicTracking = React.lazy(() => import("@/pages/PublicTracking"));
 
 const queryClient = new QueryClient();
@@ -93,6 +95,20 @@ const App = () => (
                 <ProtectedRoute allowedRoles={['supervisor']}>
                   <Suspense fallback={<PageLoader />}>
                     <TicketTypes />
+                  </Suspense>
+                </ProtectedRoute>
+              } />
+              <Route path="/setup-levels" element={
+                <ProtectedRoute allowedRoles={['supervisor']}>
+                  <Suspense fallback={<PageLoader />}>
+                    <SetupLevels />
+                  </Suspense>
+                </ProtectedRoute>
+              } />
+              <Route path="/teams" element={
+                <ProtectedRoute allowedRoles={['supervisor']}>
+                  <Suspense fallback={<PageLoader />}>
+                    <Teams />
                   </Suspense>
                 </ProtectedRoute>
               } />
