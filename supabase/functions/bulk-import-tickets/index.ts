@@ -89,6 +89,8 @@ Deno.serve(async (req) => {
             status: "nao_iniciado",
             total_execution_seconds: 0,
             total_paused_seconds: 0,
+            setup_level: t.setup_level || null,
+            team: t.team || null,
           })
           .select("id")
           .single();

@@ -35,6 +35,8 @@ const EXPECTED_COLUMNS = [
   'status',
   'tipo',
   'responsável',
+  'nível do setup',
+  'time',
 ];
 
 // Alternative accepted column names
@@ -47,6 +49,8 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   status: ['status', 'situação', 'situacao'],
   tipo: ['tipo', 'type', 'categoria'],
   'responsável': ['responsável', 'responsavel', 'assigned', 'backoffice', 'analista'],
+  'nível do setup': ['nível do setup', 'nivel do setup', 'nível setup', 'nivel setup', 'setup level', 'setup'],
+  'time': ['time', 'team', 'equipe'],
 };
 
 function normalizeHeader(h: string): string {
@@ -135,6 +139,8 @@ interface ParsedRow {
   status_raw: string;
   type_raw: string;
   assigned: string;
+  setup_level: string;
+  team: string;
 }
 
 interface ValidationResult {
@@ -237,6 +243,8 @@ function validateAndParseFile(workbook: XLSX.WorkBook): ValidationResult {
       status_raw: status || 'Não iniciado',
       type_raw: getValue('tipo') || 'outro',
       assigned: getValue('responsável'),
+      setup_level: getValue('nível do setup'),
+      team: getValue('time'),
     });
   });
 
@@ -372,6 +380,8 @@ const BulkImport: React.FC = () => {
         status: mapStatus(r.status_raw),
         type: mapType(r.type_raw || "outro"),
         assigned_analyst_id: findUserId(r.assigned),
+        setup_level: r.setup_level || null,
+        team: r.team || null,
       }));
 
       const batchSize = 20;
@@ -417,9 +427,9 @@ const BulkImport: React.FC = () => {
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([
-      ['Solicitante', 'Base', 'Data Criação', 'Data Conclusão', 'Tempo Execução', 'Status', 'Tipo', 'Responsável'],
-      ['João', '123456 - Empresa Exemplo', '01/03/2026', '02/03/2026', '02:30', 'Concluido', 'Cliente', 'André'],
-      ['Maria', '789012 - Outra Empresa', '03/03/2026', '', '', 'Não iniciado', 'Equipamento', 'Não atribuído'],
+      ['Solicitante', 'Base', 'Data Criação', 'Data Conclusão', 'Tempo Execução', 'Status', 'Tipo', 'Responsável', 'Nível do Setup', 'Time'],
+      ['João', '123456 - Empresa Exemplo', '01/03/2026', '02/03/2026', '02:30', 'Concluido', 'Cliente', 'André', 'Básico', 'Suporte'],
+      ['Maria', '789012 - Outra Empresa', '03/03/2026', '', '', 'Não iniciado', 'Equipamento', 'Não atribuído', 'Avançado', 'Implantação'],
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Importação');
@@ -577,6 +587,8 @@ const BulkImport: React.FC = () => {
                           <th className="text-left p-2">Tipo</th>
                           <th className="text-left p-2">Status</th>
                           <th className="text-left p-2">Responsável</th>
+                          <th className="text-left p-2">Setup</th>
+                          <th className="text-left p-2">Time</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -592,6 +604,8 @@ const BulkImport: React.FC = () => {
                                 : <Badge variant="outline" className="text-[10px] text-muted-foreground">Não atribuído</Badge>
                               }
                             </td>
+                            <td className="p-2 text-xs">{r.setup_level || '-'}</td>
+                            <td className="p-2 text-xs">{r.team || '-'}</td>
                           </tr>
                         ))}
                       </tbody>
