@@ -1,101 +1,109 @@
 
-# Painel de Consulta Publica de Tickets
 
-## Resumo
-Criar um fluxo publico (sem login) para que solicitantes possam acompanhar o status dos seus chamados. O fluxo consiste em: botao na tela de login -> pagina de selecao de solicitante -> modal com tabela de resultados.
+# Melhorias de Correcao e Sustentacao
 
-## Componentes e Arquivos
+## 1. Responsividade do Select na tela PublicTracking
 
-### 1. Botao na Tela de Login (`src/pages/Login.tsx`)
-- Adicionar botao outline "Acompanhar Tickets" abaixo do botao "Chamado sem login"
-- Navega para `/public-tracking`
-- Icone: `Search` do lucide-react
+**Problema:** O `SelectContent` dentro do Dialog pode ficar cortado ou com scroll ruim em mobile.
 
-### 2. Nova Rota (`src/App.tsx`)
-- Adicionar rota publica `/public-tracking` com lazy loading, mesmo padrao das rotas publicas existentes
+**Solucao:**
+- No `PublicTracking.tsx`, adicionar classes ao `SelectContent` para limitar altura e garantir scroll: `className="max-h-[40vh] overflow-y-auto"`
+- Tambem no modal, caso o select de solicitante esteja sendo usado dentro do dialog, garantir `position="popper"` e `sideOffset` adequado
 
-### 3. Nova Pagina: `src/pages/PublicTracking.tsx`
-- Layout visual identico ao `PublicTicketForm` (gradient background, card centralizado)
-- Titulo: "Acompanhar Chamados"
-- Componentes internos:
-  - **Select searchable** com lista de solicitantes ativos (query na tabela `requesters` com RLS ja existente para anon)
-  - **Botao** "Consultar Chamados"
-  - **Botao ghost** "Voltar ao Login"
-- Ao clicar em consultar, abre o modal de resultados
+**Arquivo:** `src/pages/PublicTracking.tsx`
 
-### 4. Modal de Resultados (dentro de `PublicTracking.tsx`)
-- Usar componente `Dialog` existente com `max-w-[90vw]` no desktop
-- Conteudo:
-  - Titulo com nome do solicitante selecionado
-  - **Desktop**: Tabela com colunas:
-    - ID (8 primeiros chars, uppercase)
-    - Base
-    - Status (badge colorido)
-    - Responsavel (nome do backoffice via join com profiles)
-    - Tempo Util (calculado com `calculateBusinessSeconds`)
-  - **Mobile**: Cards empilhados verticalmente com as mesmas informacoes
-  - Paginacao de 20 registros
-  - Botao de refresh manual
+---
 
-### 5. Query de Dados
-- Buscar da tabela `tickets` filtrando por `requester_name = solicitante selecionado`
-- Campos: `id, base_name, status, assigned_analyst_id, created_at, started_at, total_execution_seconds, total_paused_seconds, finished_at, pause_started_at`
-- Join com `profiles` para nome do responsavel
-- Ordenar por `created_at` desc
-- Paginacao server-side com `.range()`
+## 2. Unidades de tempo na tela de Metricas
 
-### 6. Seguranca - RLS
-- Atualmente a tabela `tickets` exige autenticacao para SELECT (policy `Role-based ticket visibility`)
-- Sera necessario criar uma **nova RLS policy** para permitir SELECT anonimo com campos restritos
-- Policy: `Anyone can view tickets by requester name` - SELECT para `anon` role, restringindo via funcao/view ou liberando SELECT simples
-- **Alternativa mais segura**: Criar uma **Edge Function** `get-public-tickets` que usa o service_role para buscar os dados e retorna apenas os campos permitidos. Isso evita expor a tabela tickets diretamente para anonimos.
+**Problema:** O `formatTime` atual retorna `HH:MM:SS` sem indicar o que e hora, minuto ou segundo. Fica ambiguo.
 
-## Decisao de Arquitetura: Edge Function vs RLS
+**Solucao:** Alterar a funcao `formatTime` no `MetricsDashboard.tsx` para retornar formato legivel:
+- Se >= 1 dia (86400s): `Xd Xh Xmin`
+- Se >= 1 hora (3600s): `Xh Xmin`
+- Se >= 1 minuto: `Xmin`
+- Se < 1 minuto: `< 1min`
 
-Recomendo usar uma **Edge Function** (`get-public-tickets`) pelos seguintes motivos:
-- Nao expoe a tabela `tickets` para usuarios anonimos
-- Controle total dos campos retornados (sem risco de vazar dados internos)
-- Nao precisa alterar RLS existente (zero impacto no sistema)
-- Permite fazer o join com `profiles` server-side
+Isso afeta os cards de "Exec. Media" e "Pausa Media", o ranking backoffice/analista, e as tabelas de pausas.
 
-### 7. Edge Function: `supabase/functions/get-public-tickets/index.ts`
-- Recebe: `{ requester_name: string, page: number }`
-- Valida input
-- Busca tickets filtrados por `requester_name` com paginacao (20 por pagina)
-- Faz join com `profiles` para nome do responsavel
-- Retorna apenas: `id, base_name, status, analyst_name, created_at, started_at, total_execution_seconds, total_paused_seconds, finished_at, pause_started_at`
-- Retorna `total_count` para paginacao
+**Arquivo:** `src/pages/MetricsDashboard.tsx`
 
-## Detalhes Tecnicos
+---
 
-### Calculo de Tempo Util
-- Reutilizar `calculateBusinessSeconds` de `src/lib/business-time.ts`
-- Para tickets em andamento: calcular tempo desde `started_at` ate agora, subtraindo pausas
-- Para finalizados: usar `total_execution_seconds`
-- Formatar em `Xh Xmin`
+## 3. Remover Round-Robin e implementar atribuicao manual
 
-### Responsividade
-- Usar `useIsMobile()` hook existente
-- Desktop: componente `Table` padrao
-- Mobile: cards com layout vertical usando `Card` existente
+**Problema:** Atualmente existe um trigger `auto_assign_ticket` que faz round-robin automatico. O usuario quer atribuicao manual onde o backoffice principal (Andre) recebe tudo e pode reatribuir para outro backoffice.
 
-### Status Badges
-- Reutilizar o mesmo mapeamento de cores ja usado no `SupervisorPanel`:
-  - `em_andamento` -> primary
-  - `pausado` -> warning  
-  - `finalizado` -> success
-  - `nao_iniciado` -> secondary
+### 3a. Remover trigger round-robin (migracao SQL)
 
-### Arquivos a Criar
-1. `src/pages/PublicTracking.tsx` - Pagina principal com select + modal + tabela
-2. `supabase/functions/get-public-tickets/index.ts` - Edge Function segura
+Criar migracao para:
+```sql
+DROP TRIGGER IF EXISTS auto_assign_ticket_trigger ON public.tickets;
+DROP FUNCTION IF EXISTS public.auto_assign_ticket();
+```
 
-### Arquivos a Modificar
-1. `src/pages/Login.tsx` - Adicionar botao "Acompanhar Tickets"
-2. `src/App.tsx` - Adicionar rota `/public-tracking`
+Os tickets passarao a ser criados com `status = 'nao_iniciado'` e `assigned_analyst_id = NULL` (defaults da tabela).
 
-### Nenhuma alteracao em
-- Logica de tickets existente
-- Fluxos internos (analyst, backoffice, supervisor)
-- RLS policies existentes
-- Tabelas do banco de dados
+### 3b. Tela do Backoffice: botao "Assumir" e "Atribuir"
+
+No `BackofficePanel.tsx`:
+- Adicionar uma nova aba/secao "Nao Atribuidos" que lista tickets com `status = 'nao_iniciado'` e `assigned_analyst_id IS NULL`
+- Botao "Assumir" — atribui o ticket para si mesmo, muda status para `em_andamento` e seta `started_at = now()`
+- Botao "Atribuir" — abre um select com lista de backoffices ativos, permite escolher outro backoffice para receber o ticket
+
+Para isso, sera necessario:
+- Query adicional para buscar tickets nao atribuidos (acessivel por backoffice)
+- Query para listar usuarios com role `backoffice` (para o select de atribuicao)
+- Nova RLS policy ou ajustar a existente para que backoffice possa ver tickets nao atribuidos (`assigned_analyst_id IS NULL`)
+
+### 3c. RLS - Permitir backoffice ver tickets nao atribuidos
+
+Atualmente a policy `Role-based ticket visibility` para backoffice exige `assigned_analyst_id = auth.uid()`. Precisamos expandir para incluir `assigned_analyst_id IS NULL`:
+
+```sql
+DROP POLICY IF EXISTS "Role-based ticket visibility" ON public.tickets;
+CREATE POLICY "Role-based ticket visibility" ON public.tickets
+  FOR SELECT TO authenticated
+  USING (
+    has_role(auth.uid(), 'supervisor'::app_role)
+    OR (has_role(auth.uid(), 'backoffice'::app_role) AND (assigned_analyst_id = auth.uid() OR assigned_analyst_id IS NULL))
+    OR (has_role(auth.uid(), 'analyst'::app_role) AND requester_user_id = auth.uid())
+  );
+```
+
+Mesma logica para UPDATE policy — backoffice precisa poder atualizar tickets nao atribuidos para assumir:
+
+```sql
+DROP POLICY IF EXISTS "Role-based ticket update" ON public.tickets;
+CREATE POLICY "Role-based ticket update" ON public.tickets
+  FOR UPDATE TO authenticated
+  USING (
+    has_role(auth.uid(), 'supervisor'::app_role)
+    OR (has_role(auth.uid(), 'backoffice'::app_role) AND (assigned_analyst_id = auth.uid() OR assigned_analyst_id IS NULL))
+    OR (has_role(auth.uid(), 'analyst'::app_role) AND requester_user_id = auth.uid())
+  );
+```
+
+### 3d. UI do BackofficePanel
+
+Adicionar nova aba "Nao Atribuidos" com:
+- Tabela com colunas: ID, Base, Solicitante, Prioridade, Tipo, Data, Acoes
+- Acoes: "Assumir" (botao primario) e "Atribuir" (botao outline que abre dialog com select de backoffices)
+- Dialog de atribuicao: select com lista de backoffices, botao confirmar
+
+### Detalhes Tecnicos
+
+**Migracao SQL:**
+- Drop trigger e funcao round-robin
+- Atualizar RLS policies de SELECT e UPDATE na tabela tickets
+
+**Arquivos a modificar:**
+1. `src/pages/MetricsDashboard.tsx` — formatTime com unidades claras (d, h, min)
+2. `src/pages/PublicTracking.tsx` — responsividade do SelectContent
+3. `src/pages/BackofficePanel.tsx` — nova aba "Nao Atribuidos", botoes "Assumir" e "Atribuir", query de backoffices
+
+**Nenhuma alteracao em:**
+- Fluxo do analista
+- Fluxo do supervisor
+- Edge functions existentes
+
