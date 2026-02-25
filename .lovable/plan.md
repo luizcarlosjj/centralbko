@@ -1,94 +1,41 @@
 
 
-## Plano de Ajustes: Meta 48h, Exclusao de Chamados, Pesquisa e Ordenacao
+## Analise do Problema
 
-### 1. Correcao da Meta 48h
+### Causa Raiz
 
-**Problema:** A meta de 48h esta usando `48 * 3600 = 172.800 segundos`, mas 48h uteis nao correspondem a 48 horas de relogio. Um dia util tem 8h48min (528 minutos = 31.680 segundos), entao 2 dias uteis = 17h36min = 63.360 segundos.
+O card "Meta 2 Dias Úteis" no frontend calcula o tempo usando `calculateBusinessSeconds(created_at, finished_at)` -- ou seja, o **tempo total de negócio decorrido** entre a criação e a finalização do chamado. Isso inclui o tempo em que o chamado esteve **pausado**.
 
-**Alteracao em 3 arquivos:**
-- `src/pages/MetricsDashboard.tsx` (linha 81): `FORTY_EIGHT_HOURS_BIZ = 63360`
-- `src/pages/SupervisorPanel.tsx` (linha 270): `FORTY_EIGHT_HOURS_BIZ = 63360`
-- `src/pages/BackofficePanel.tsx` (linha 168): `FORTY_EIGHT_HOURS_BIZ = 63360`
-- Atualizar labels de "48h uteis" para "2 dias uteis (17h36min)" nos textos dos cards
+Porém, a meta deveria usar o `total_execution_seconds` armazenado no banco de dados, que representa o **tempo real de execução** (descontando pausas).
 
-Tambem atualizar a edge function `recalculate-business-time` caso use esse threshold.
+**Prova:**
+- Consulta no banco: `total_execution_seconds > 63360` retorna **exatamente 2 chamados** (conforme o usuário espera)
+- O frontend recalcula com `calculateBusinessSeconds(created_at, finished_at)` que dá valores muito maiores por incluir pausas, resultando em mais chamados "fora da meta"
 
-### 2. Supervisor pode excluir chamados
+### Exemplo concreto
+- Ticket "Tecnofrio Gravatai": `total_execution_seconds = 60060` (abaixo da meta), mas `calculateBusinessSeconds(created_at, finished_at)` para o intervalo `2026-02-18 00:00 → 2026-02-19 14:41` daria ~21h+ de tempo útil (acima da meta) -- porque inclui todo o tempo pausado
 
-**Arquivo:** `src/pages/SupervisorPanel.tsx`
+### Mudanças Necessárias
 
-- Adicionar botao "Excluir" com icone `Trash2` na coluna de acoes de cada ticket
-- Adicionar dialog de confirmacao (`AlertDialog`) antes de excluir
-- Criar funcao `deleteTicket` que:
-  1. Deleta registros dependentes na ordem: `pause_response_files`, `pause_responses`, `pause_evidences`, `pause_logs`, `ticket_status_logs`
-  2. Deleta o ticket
-- Necessaria migration SQL para adicionar policy de DELETE na tabela `tickets` para supervisores, e nas tabelas dependentes
+**1. Card "Meta 2 Dias Úteis" (linhas 82-87 do MetricsDashboard.tsx)**
+- Trocar `calculateBusinessSeconds(created_at, finished_at)` por `t.total_execution_seconds`
+- Comparar `total_execution_seconds <= 63360` para determinar se está dentro da meta
 
-**Migration SQL:**
-```sql
-ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
+**2. Ranking Backoffice -- Remover "Meta 48h" (linhas 316-320)**
+- Remover o bloco que exibe `{b.meta48h}%` e "Meta 48h" no canto superior direito de cada card do ranking
 
-CREATE POLICY "Supervisors can delete tickets"
-  ON public.tickets FOR DELETE
-  USING (has_role(auth.uid(), 'supervisor'::app_role));
+**3. Ranking Backoffice -- Recalcular meta com total_execution_seconds (linhas 118-122)**
+- Usar `t.total_execution_seconds <= FORTY_EIGHT_HOURS_BIZ` em vez de `calculateBusinessSeconds`
 
-CREATE POLICY "Supervisors can delete ticket_status_logs"
-  ON public.ticket_status_logs FOR DELETE
-  USING (has_role(auth.uid(), 'supervisor'::app_role));
+**4. Linha de rodapé do ranking (linha 347)**
+- Manter o texto "{b.within48h} de {b.finalizados} concluídos em até 2 dias úteis" que já usa o valor corrigido
 
-CREATE POLICY "Supervisors can delete pause_logs"
-  ON public.pause_logs FOR DELETE
-  USING (has_role(auth.uid(), 'supervisor'::app_role));
+### Resumo das alterações
 
-CREATE POLICY "Supervisors can delete pause_evidences"
-  ON public.pause_evidences FOR DELETE
-  USING (has_role(auth.uid(), 'supervisor'::app_role));
+Arquivo: `src/pages/MetricsDashboard.tsx`
+- Linha 82-86: Usar `total_execution_seconds` no cálculo do card global
+- Linhas 118-121: Usar `total_execution_seconds` no cálculo por backoffice  
+- Linhas 316-320: Remover exibição "Meta 48h" do ranking
 
-CREATE POLICY "Supervisors can delete pause_responses"
-  ON public.pause_responses FOR DELETE
-  USING (has_role(auth.uid(), 'supervisor'::app_role));
-
-CREATE POLICY "Supervisors can delete pause_response_files"
-  ON public.pause_response_files FOR DELETE
-  USING (has_role(auth.uid(), 'supervisor'::app_role));
-```
-
-### 3. Pesquisa global no BackofficePanel (todas as abas)
-
-**Problema atual:** A busca so funciona na aba "Finalizados". As abas "Nao Atribuidos" e "Em Aberto" nao tem pesquisa.
-
-**Solucao:**
-- Mover a barra de busca para fora das tabs, no topo, como campo global
-- Aplicar filtro de texto (por ID, base_name, requester_name) em todas as 3 abas:
-  - `unassignedTickets` — filtro local
-  - `filteredOpen` — adicionar filtro de texto alem dos filtros existentes
-  - `finishedTickets` — ja tem, unificar com o campo global
-
-### 4. Ordenacao de colunas no BackofficePanel
-
-**Todas as 3 abas (Nao Atribuidos, Em Aberto, Finalizados):**
-- Adicionar estado `sortColumn` e `sortDirection` (asc/desc)
-- Colunas ordenaveis: ID, Base, Solicitante, Prioridade, Data, Tempo
-- Ao clicar no cabecalho da coluna, alterna a direcao de ordenacao
-- Icone `ArrowUpDown` / `ArrowUp` / `ArrowDown` no cabecalho
-
-### 5. Pesquisa e ordenacao nos chamados em aberto (BackofficePanel aba "Em Aberto")
-
-Ja coberto pelos itens 3 e 4 acima. A pesquisa por nome ou codigo sera o campo global, e a ordenacao sera pelas colunas clicaveis.
-
-### 6. Pesquisa e ordenacao no SupervisorPanel
-
-Aplicar o mesmo padrao de pesquisa por texto e ordenacao de colunas na tabela do supervisor.
-
----
-
-### Resumo de arquivos modificados
-
-| Arquivo | Alteracao |
-|---|---|
-| `src/pages/MetricsDashboard.tsx` | Meta 48h = 63360s, labels |
-| `src/pages/SupervisorPanel.tsx` | Meta 48h = 63360s, botao excluir + dialog, pesquisa, ordenacao |
-| `src/pages/BackofficePanel.tsx` | Meta 48h = 63360s, pesquisa global, ordenacao colunas |
-| Migration SQL | Policies DELETE para supervisor |
+Nenhuma alteração necessária no banco de dados ou edge functions.
 
