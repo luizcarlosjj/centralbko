@@ -1,0 +1,1 @@
+ALTER TABLE public.tickets DROP CONSTRAINT tickets_type_check;
