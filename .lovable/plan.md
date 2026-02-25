@@ -1,78 +1,75 @@
 
 
-# Plano: Exportacao de Dados e Backup Completo na Tela de Importacao em Massa
+# Plano: Correcao de Dados e Metricas do Sistema de Chamados
 
-## Contexto
+## Problemas Identificados
 
-A tela de BulkImport atualmente so permite importar e excluir chamados. O usuario precisa de ferramentas de exportacao para backup e migracao futura.
+### 1. Meta 48h usa tempo de relogio em vez de tempo util
+**Arquivo:** `src/pages/MetricsDashboard.tsx` (linha 80-84)
+O calculo atual usa `new Date(finished_at).getTime() - new Date(created_at).getTime()` (milissegundos de relogio). Isso significa que um chamado criado sexta as 17h e finalizado segunda as 09h aparece como ~64h, quando na verdade foram poucas horas uteis. Deve usar `calculateBusinessSeconds` para contar apenas tempo util (08:00-18:00, excluindo almoco e feriados).
 
-## Funcionalidades a Implementar
+### 2. Finalizacao de chamado no BackofficePanel usa tempo de relogio
+**Arquivo:** `src/pages/BackofficePanel.tsx` (linhas 200-201)
+```typescript
+execSeconds += Math.floor((now.getTime() - new Date(ticket.started_at).getTime()) / 1000);
+```
+Deveria usar `calculateBusinessSeconds(new Date(ticket.started_at), now)` para acumular apenas tempo util de execucao.
 
-### 1. Botao "Exportar Chamados (Excel)"
-- Exporta TODOS os tickets da tabela `tickets` para um arquivo `.xlsx` no formato do modelo existente
-- Colunas: Solicitante, Base, Data Criacao (com hora), Data Conclusao (com hora), Hora Abertura, Hora Encerramento, Tempo Execucao, Status, Tipo, Responsavel, Nivel do Setup, Time, Prioridade, Descricao
-- Os campos "Hora Abertura" e "Hora Encerramento" serao extraidos de `created_at` e `finished_at` respectivamente (formato HH:MM:SS)
-- Busca o nome do responsavel via join com `profiles` usando `assigned_analyst_id`
-- Nome do arquivo: `chamados_export_YYYY-MM-DD.xlsx`
+### 3. Retomada de pausa no SupervisorPanel usa tempo de relogio
+**Arquivo:** `src/pages/SupervisorPanel.tsx` (linhas 203, 210)
+O calculo de `pausedSecs` e `additionalPaused` usa `Date.now() - pauseStart` em vez de business time.
 
-### 2. Botao "Exportar Dados do Sistema (SQL)"
-- Gera um arquivo `.sql` contendo INSERTs de todas as tabelas de configuracao do sistema:
-  - `pause_reasons` (motivos de pausa)
-  - `setup_levels` (niveis de setup)
-  - `teams` (times)
-  - `ticket_types` (tipos de chamado)
-  - `requesters` (solicitantes)
-  - `profiles` (perfis de usuario)
-  - `user_roles` (papeis)
-  - `pause_logs` (logs de pausa)
-  - `pause_evidences` (evidencias)
-  - `pause_responses` + `pause_response_files`
-  - `ticket_status_logs` (historico de status)
-  - `assignment_control`
-- Cada tabela precedida de comentario SQL com nome e quantidade de registros
-- Formato: INSERTs individuais com valores escapados
-- Nome do arquivo: `backup_sistema_YYYY-MM-DD.sql`
+### 4. Tempo medio no SupervisorPanel calculado apenas da pagina atual
+**Arquivo:** `src/pages/SupervisorPanel.tsx` (linhas 243-245)
+O `avgTime` e calculado apenas dos tickets da pagina filtrada/paginada, nao de todos os tickets finalizados. Deve ser um valor global.
 
-### 3. Atualizacao do Modelo de Planilha
-- Adicionar colunas "Hora Abertura" e "Hora Encerramento" ao template
-- Atualizar exemplos com horarios (ex: `08:59:52`, `16:30:00`)
+### 5. Falta card "Meta 48h" no painel do Backoffice
+O usuario solicitou que o BackofficePanel tenha um indicador de "media de conclusao em ate 48h" similar ao que existe no MetricsDashboard.
 
-## Alteracoes no Layout
+### 6. Feriados de Carnaval ja estao corretos
+O `business-time.ts` calcula corretamente Carnaval como Easter-49 (segunda) e Easter-48 (terca). Para 2026, Pascoa = 5 de abril, entao Carnaval = 16/02 (segunda) e 17/02 (terca). Esses dias ja sao excluidos do calculo de tempo util. Nenhuma alteracao necessaria aqui.
 
-A area de cabecalho sera expandida para conter 3 botoes ao lado do titulo:
-- **Modelo** (ja existente) - download do template
-- **Exportar Chamados** (novo) - icone FileSpreadsheet, cor verde/outline
-- **Exportar SQL** (novo) - icone Database, cor outline
+## Alteracoes Planejadas
 
-## Detalhes Tecnicos
+### Arquivo 1: `src/pages/MetricsDashboard.tsx`
+- Importar `calculateBusinessSeconds` de `@/lib/business-time`
+- Alterar calculo de Meta 48h para usar `calculateBusinessSeconds(created_at, finished_at)` em vez de diferenca de milissegundos
+- 48h uteis = 48 * 3600 = 172800 segundos de negocio
 
-### Arquivo modificado
-- `src/pages/BulkImport.tsx`
+### Arquivo 2: `src/pages/BackofficePanel.tsx`
+- Importar `calculateBusinessSeconds` de `@/lib/business-time`
+- No `finalizeTicket`, substituir calculo de `execSeconds` por `calculateBusinessSeconds`
+- Adicionar card "Meta 48h" no topo do painel com contagem de chamados finalizados pelo backoffice logado em ate 48h uteis, usando query separada para buscar todos finalizados do usuario
 
-### Dependencias
-- `xlsx` (ja instalado) para gerar o Excel
-- Nenhuma nova dependencia necessaria
-- O SQL sera gerado como string pura e baixado via `Blob` + `URL.createObjectURL`
+### Arquivo 3: `src/pages/SupervisorPanel.tsx`
+- Importar `calculateBusinessSeconds`
+- No `resumeTicket`, substituir calculo de tempo pausado por business time
+- Adicionar query global para tempo medio de todos os finalizados (nao apenas da pagina atual)
+- Adicionar card "Meta 48h" aos cards do supervisor
 
-### Estrategia de exportacao de chamados
+### Detalhes Tecnicos
+
+**Calculo correto de Meta 48h:**
 ```text
-1. Fetch tickets (sem limite de 1000 - paginar se necessario)
-2. Fetch profiles para mapear analyst_id -> nome
-3. Montar array de linhas
-4. Gerar XLSX com xlsx library
-5. Trigger download
+Para cada ticket finalizado:
+  businessSecs = calculateBusinessSeconds(created_at, finished_at)
+  Se businessSecs <= 172800 (48h uteis) → conta como "dentro da meta"
 ```
 
-### Estrategia de exportacao SQL
-```text
-1. Fetch cada tabela sequencialmente
-2. Para cada registro, gerar INSERT INTO ... VALUES (...)
-3. Escapar aspas simples nos valores string
-4. Concatenar tudo em uma string
-5. Gerar arquivo .sql via Blob download
-```
+**Card Meta 48h no BackofficePanel:**
+- Query adicional para buscar todos os tickets finalizados do usuario logado (com paginacao para superar limite de 1000)
+- Calculo local: quantidade concluida em ate 48h uteis / total finalizado
+- Exibicao: percentual + contagem absoluta
 
-### Paginacao para superar limite de 1000 registros
-- Usar loop com `.range(offset, offset + 999)` ate receber menos de 1000 resultados
-- Aplicar para tickets e ticket_status_logs (tabelas que podem exceder 1000)
+**Card Meta 48h no SupervisorPanel:**
+- Adicionar query global de todos os tickets finalizados (nao paginada)
+- Calcular Meta 48h usando `calculateBusinessSeconds` para cada ticket
+- Exibir ao lado dos cards existentes
+
+**Arquivos modificados:**
+- `src/pages/MetricsDashboard.tsx`
+- `src/pages/BackofficePanel.tsx`
+- `src/pages/SupervisorPanel.tsx`
+
+Nenhuma alteracao de banco de dados necessaria.
 
