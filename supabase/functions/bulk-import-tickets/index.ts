@@ -21,32 +21,64 @@ Deno.serve(async (req) => {
 
     // Handle DELETE action
     if (body.action === "delete_all") {
-      // Delete status logs first (foreign key)
-      const { error: logsError } = await supabase
-        .from("ticket_status_logs")
-        .delete()
-        .like("old_status", "%");
-      
-      if (logsError) {
-        console.error("Error deleting status logs:", logsError);
-      }
-
-      // Delete all tickets that were imported (have description starting with "Importado")
-      const { data: deleted, error: deleteError } = await supabase
+      // First, find all imported ticket IDs
+      const { data: importedTickets, error: findError } = await supabase
         .from("tickets")
-        .delete()
-        .like("description", "Importado da planilha%")
-        .select("id");
+        .select("id")
+        .like("description", "Importado da planilha%");
 
-      if (deleteError) {
+      if (findError) {
         return new Response(
-          JSON.stringify({ error: "Erro ao excluir: " + deleteError.message }),
+          JSON.stringify({ error: "Erro ao buscar tickets: " + findError.message }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
+      if (!importedTickets || importedTickets.length === 0) {
+        return new Response(
+          JSON.stringify({ success: true, deletedCount: 0 }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const ticketIds = importedTickets.map(t => t.id);
+      
+      // Delete in correct order respecting foreign keys
+      // Process in batches of 50 to avoid query limits
+      for (let i = 0; i < ticketIds.length; i += 50) {
+        const batch = ticketIds.slice(i, i + 50);
+        
+        // 1. Delete pause_response_files (depends on pause_responses)
+        const { data: pauseResponses } = await supabase
+          .from("pause_responses")
+          .select("id")
+          .in("ticket_id", batch);
+        
+        if (pauseResponses && pauseResponses.length > 0) {
+          const prIds = pauseResponses.map(pr => pr.id);
+          for (let j = 0; j < prIds.length; j += 50) {
+            await supabase.from("pause_response_files").delete().in("pause_response_id", prIds.slice(j, j + 50));
+          }
+        }
+
+        // 2. Delete pause_responses
+        await supabase.from("pause_responses").delete().in("ticket_id", batch);
+
+        // 3. Delete pause_evidences
+        await supabase.from("pause_evidences").delete().in("ticket_id", batch);
+
+        // 4. Delete pause_logs
+        await supabase.from("pause_logs").delete().in("ticket_id", batch);
+
+        // 5. Delete ticket_status_logs
+        await supabase.from("ticket_status_logs").delete().in("ticket_id", batch);
+
+        // 6. Delete tickets
+        await supabase.from("tickets").delete().in("id", batch);
+      }
+
       return new Response(
-        JSON.stringify({ success: true, deletedCount: deleted?.length || 0 }),
+        JSON.stringify({ success: true, deletedCount: ticketIds.length }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
