@@ -100,7 +100,6 @@ const MetricsDashboard = () => {
 
   // Rankings
   const backofficeUserIds = new Set(userRoles.filter(r => r.role === 'backoffice').map(r => r.user_id));
-  const analystUserIds = new Set(userRoles.filter(r => r.role === 'analyst').map(r => r.user_id));
 
   const backofficeRanking = profiles
     .filter(p => backofficeUserIds.has(p.id))
@@ -109,40 +108,32 @@ const MetricsDashboard = () => {
       const finishedByUser = assignedTickets.filter(t => t.status === 'finalizado');
       const inProgressByUser = assignedTickets.filter(t => t.status === 'em_andamento').length;
       const pausedByUser = assignedTickets.filter(t => t.status === 'pausado').length;
+      const naoIniciado = assignedTickets.filter(t => t.status === 'nao_iniciado').length;
       const avgExec = finishedByUser.length > 0
         ? Math.round(finishedByUser.reduce((s, t) => s + (t.total_execution_seconds || 0), 0) / finishedByUser.length)
         : 0;
       const avgPause = finishedByUser.length > 0
         ? Math.round(finishedByUser.reduce((s, t) => s + (t.total_paused_seconds || 0), 0) / finishedByUser.length)
         : 0;
+      const within48h = finishedByUser.filter(t => {
+        if (!t.finished_at) return false;
+        return calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at)) <= FORTY_EIGHT_HOURS_BIZ;
+      }).length;
+      const meta48h = finishedByUser.length > 0 ? Math.round((within48h / finishedByUser.length) * 100) : 0;
       return {
         name: p.name,
         total: assignedTickets.length,
         finalizados: finishedByUser.length,
         emAndamento: inProgressByUser,
         pausados: pausedByUser,
+        naoIniciado,
         tempoMedio: avgExec,
         tempoPausaMedio: avgPause,
+        meta48h,
+        within48h,
       };
     })
     .sort((a, b) => b.finalizados - a.finalizados);
-
-  const analystRanking = profiles
-    .filter(p => analystUserIds.has(p.id))
-    .map(p => {
-      const requestedTickets = tickets.filter(t => t.requester_user_id === p.id);
-      const finishedByUser = requestedTickets.filter(t => t.status === 'finalizado').length;
-      const pendingByUser = requestedTickets.filter(t => t.status === 'pausado').length;
-      const inProgressByUser = requestedTickets.filter(t => t.status === 'em_andamento').length;
-      return {
-        name: p.name,
-        total: requestedTickets.length,
-        finalizados: finishedByUser,
-        emAndamento: inProgressByUser,
-        pendentes: pendingByUser,
-      };
-    })
-    .sort((a, b) => b.total - a.total);
 
   const byPriority = Object.entries(PRIORITY_LABELS).map(([key, label]) => ({
     name: label,
@@ -300,72 +291,66 @@ const MetricsDashboard = () => {
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-foreground">Dashboard de Métricas</h1>
 
-        {/* Rankings side by side at top */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Users className="h-5 w-5 text-primary" />
-                Ranking Backoffice
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {backofficeRanking.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Nenhum backoffice encontrado</p>}
-                {backofficeRanking.map((b, i) => (
-                  <div key={b.name} className="flex items-start gap-3 rounded-lg border p-3">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary shrink-0">
+        {/* Ranking Backoffice - full width */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Ranking Backoffice
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {backofficeRanking.length === 0 && <p className="text-sm text-muted-foreground text-center py-4 col-span-full">Nenhum backoffice encontrado</p>}
+              {backofficeRanking.map((b, i) => (
+                <div key={b.name} className="rounded-lg border p-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary shrink-0">
                       {i + 1}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-foreground">{b.name}</p>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        <Badge variant="outline" className="text-xs">{b.finalizados} finalizados</Badge>
-                        <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20">{b.emAndamento} em andamento</Badge>
-                        <Badge variant="outline" className="text-xs bg-warning/10 text-warning border-warning/20">{b.pausados} pausados</Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {b.total} total · Exec. média: {formatTime(b.tempoMedio)} · Pausa média: {formatTime(b.tempoPausaMedio)}
+                      <p className="font-semibold text-foreground truncate">{b.name}</p>
+                      <p className="text-xs text-muted-foreground">{b.total} chamados atribuídos</p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-lg font-bold ${b.meta48h >= 80 ? 'text-success' : b.meta48h >= 50 ? 'text-warning' : 'text-destructive'}`}>
+                        {b.meta48h}%
                       </p>
+                      <p className="text-[10px] text-muted-foreground">Meta 48h</p>
                     </div>
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Users className="h-5 w-5 text-info" />
-                Ranking Analistas (Solicitantes)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {analystRanking.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Nenhum analista encontrado</p>}
-                {analystRanking.map((a, i) => (
-                  <div key={a.name} className="flex items-start gap-3 rounded-lg border p-3">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-info/10 text-sm font-bold text-info shrink-0">
-                      {i + 1}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-foreground">{a.name}</p>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        <Badge variant="outline" className="text-xs">{a.total} abertos</Badge>
-                        <Badge variant="outline" className="text-xs bg-success/10 text-success border-success/20">{a.finalizados} finalizados</Badge>
-                        <Badge variant="outline" className="text-xs bg-warning/10 text-warning border-warning/20">{a.pendentes} pendentes</Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {a.emAndamento} em andamento
-                      </p>
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div className="rounded-md bg-muted/50 p-2">
+                      <p className="text-sm font-bold text-success">{b.finalizados}</p>
+                      <p className="text-[10px] text-muted-foreground">Finalizados</p>
+                    </div>
+                    <div className="rounded-md bg-muted/50 p-2">
+                      <p className="text-sm font-bold text-primary">{b.emAndamento}</p>
+                      <p className="text-[10px] text-muted-foreground">Em Andam.</p>
+                    </div>
+                    <div className="rounded-md bg-muted/50 p-2">
+                      <p className="text-sm font-bold text-warning">{b.pausados}</p>
+                      <p className="text-[10px] text-muted-foreground">Pausados</p>
+                    </div>
+                    <div className="rounded-md bg-muted/50 p-2">
+                      <p className="text-sm font-bold text-muted-foreground">{b.naoIniciado}</p>
+                      <p className="text-[10px] text-muted-foreground">Não Inic.</p>
                     </div>
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+
+                  <div className="flex justify-between text-xs text-muted-foreground border-t pt-2">
+                    <span>Exec. média: <span className="font-medium text-foreground">{formatTime(b.tempoMedio)}</span></span>
+                    <span>Pausa média: <span className="font-medium text-foreground">{formatTime(b.tempoPausaMedio)}</span></span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    <span>{b.within48h} de {b.finalizados} concluídos em até 48h úteis</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
