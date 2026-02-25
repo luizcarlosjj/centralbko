@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal, Search, Target, PlayCircle } from 'lucide-react';
+import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal, Search, Target, PlayCircle, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TicketStatus, PauseLog, Profile } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
@@ -35,6 +35,9 @@ const statusColor: Record<string, string> = {
   finalizado: 'bg-success/10 text-success border-success/20',
 };
 
+type SortColumn = 'id' | 'base_name' | 'requester_name' | 'priority' | 'created_at' | 'total_execution_seconds' | 'status';
+type SortDirection = 'asc' | 'desc';
+
 const AnalystPanel = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -48,14 +51,20 @@ const AnalystPanel = () => {
   const [filterType, setFilterType] = useState<string>('all');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
-  const [finishedSearch, setFinishedSearch] = useState('');
+
+  // Global search
+  const [globalSearch, setGlobalSearch] = useState('');
+
+  // Sorting
+  const [sortColumn, setSortColumn] = useState<SortColumn>('created_at');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   // Pagination
   const [openPage, setOpenPage] = useState(0);
   const [finishedPage, setFinishedPage] = useState(0);
   const [unassignedPage, setUnassignedPage] = useState(0);
 
-  // Expanded rows for tickets (open + finished)
+  // Expanded rows
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [pauseLogs, setPauseLogs] = useState<Record<string, PauseLog[]>>({});
   const [pauseReasonNames, setPauseReasonNames] = useState<Record<string, string>>({});
@@ -109,7 +118,6 @@ const AnalystPanel = () => {
     staleTime: 60_000,
   });
 
-  // Unassigned tickets query
   const { data: unassignedData, isLoading: unassignedLoading } = useQuery({
     queryKey: ['backoffice-unassigned-tickets', unassignedPage],
     queryFn: async () => {
@@ -127,7 +135,6 @@ const AnalystPanel = () => {
     staleTime: 30_000,
   });
 
-  // Backoffice users for assignment
   const { data: backofficeUsers = [] } = useQuery({
     queryKey: ['backoffice-users-list'],
     queryFn: async () => {
@@ -140,7 +147,6 @@ const AnalystPanel = () => {
     staleTime: 120_000,
   });
 
-  // Query all finished tickets for this user (for Meta 48h card)
   const { data: allMyFinished = [] } = useQuery({
     queryKey: ['backoffice-all-finished-meta', user?.id],
     queryFn: async () => {
@@ -165,7 +171,7 @@ const AnalystPanel = () => {
     staleTime: 60_000,
   });
 
-  const FORTY_EIGHT_HOURS_BIZ = 48 * 3600;
+  const FORTY_EIGHT_HOURS_BIZ = 63360; // 2 dias úteis = 17h36min
   const myFinishedWithin48h = allMyFinished.filter(t => {
     if (!t.finished_at) return false;
     const bizSecs = calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at));
@@ -188,7 +194,6 @@ const AnalystPanel = () => {
     queryClient.invalidateQueries({ queryKey: ['backoffice-all-finished-meta'] });
   }, [queryClient]);
 
-  // Realtime subscription for live updates
   useEffect(() => {
     const channel = supabase
       .channel('analyst-tickets-realtime')
@@ -210,7 +215,6 @@ const AnalystPanel = () => {
         if (data) {
           const logs = data as unknown as PauseLog[];
           setPauseLogs(prev => ({ ...prev, [ticketId]: logs }));
-          // Fetch reason names
           const reasonIds = [...new Set(logs.map(l => l.pause_reason_id))].filter(id => !pauseReasonNames[id]);
           if (reasonIds.length > 0) {
             const { data: reasons } = await supabase.from('pause_reasons').select('id, title').in('id', reasonIds);
@@ -223,8 +227,6 @@ const AnalystPanel = () => {
     }
     setExpandedRows(next);
   };
-
-  // resumeTicket removed - backoffice cannot resume, only analyst can resolve pendency
 
   const finalizeTicket = async (ticket: Ticket) => {
     if (!user) return;
@@ -292,7 +294,17 @@ const AnalystPanel = () => {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  // Search filter helper
+  const searchLower = globalSearch.toLowerCase().trim();
+  const matchesSearch = (t: Ticket) => {
+    if (!searchLower) return true;
+    return t.id.toLowerCase().includes(searchLower) ||
+      t.base_name.toLowerCase().includes(searchLower) ||
+      t.requester_name.toLowerCase().includes(searchLower);
+  };
+
   const filteredOpen = openTickets.filter(t => {
+    if (!matchesSearch(t)) return false;
     if (filterStatus !== 'all' && t.status !== filterStatus) return false;
     if (filterPriority !== 'all' && t.priority !== filterPriority) return false;
     if (filterType !== 'all' && t.type !== filterType) return false;
@@ -300,6 +312,52 @@ const AnalystPanel = () => {
     if (filterDateTo && new Date(t.created_at) > new Date(filterDateTo + 'T23:59:59')) return false;
     return true;
   });
+
+  const filteredUnassigned = unassignedTickets.filter(matchesSearch);
+  const filteredFinished = finishedTickets.filter(matchesSearch);
+
+  // Sorting
+  const priorityOrder: Record<string, number> = { urgente: 0, alta: 1, media: 2, baixa: 3 };
+
+  const sortTickets = (list: Ticket[]) => {
+    return [...list].sort((a, b) => {
+      let cmp = 0;
+      switch (sortColumn) {
+        case 'id': cmp = a.id.localeCompare(b.id); break;
+        case 'base_name': cmp = a.base_name.localeCompare(b.base_name); break;
+        case 'requester_name': cmp = a.requester_name.localeCompare(b.requester_name); break;
+        case 'priority': cmp = (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9); break;
+        case 'status': cmp = a.status.localeCompare(b.status); break;
+        case 'created_at': cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime(); break;
+        case 'total_execution_seconds': cmp = (a.total_execution_seconds || 0) - (b.total_execution_seconds || 0); break;
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  };
+
+  const sortedUnassigned = sortTickets(filteredUnassigned);
+  const sortedOpen = sortTickets(filteredOpen);
+  const sortedFinished = sortTickets(filteredFinished);
+
+  const toggleSort = (col: SortColumn) => {
+    if (sortColumn === col) {
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(col);
+      setSortDirection('asc');
+    }
+  };
+
+  const SortIcon = ({ col }: { col: SortColumn }) => {
+    if (sortColumn !== col) return <ArrowUpDown className="h-3 w-3 ml-1 inline opacity-40" />;
+    return sortDirection === 'asc' ? <ArrowUp className="h-3 w-3 ml-1 inline" /> : <ArrowDown className="h-3 w-3 ml-1 inline" />;
+  };
+
+  const SortableHead = ({ col, children }: { col: SortColumn; children: React.ReactNode }) => (
+    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort(col)}>
+      {children} <SortIcon col={col} />
+    </TableHead>
+  );
 
   const openStatusOptions: Record<string, string> = { em_andamento: 'Em Andamento', pausado: 'Pausado' };
   const openTotalPages = Math.ceil(openTotal / PAGE_SIZE);
@@ -326,16 +384,16 @@ const AnalystPanel = () => {
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-foreground">Painel do Analista</h1>
 
-        {/* Meta 48h Card */}
+        {/* Meta Card */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Card className="border-primary/30 bg-primary/5">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-primary">Meta 48h</CardTitle>
+              <CardTitle className="text-sm font-medium text-primary">Meta 2 Dias Úteis</CardTitle>
               <Target className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
               <p className="text-3xl font-bold text-primary">{myMeta48hRate}%</p>
-              <p className="text-[10px] text-muted-foreground mt-1">{myFinishedWithin48h}/{allMyFinished.length} concluídos em 48h úteis</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{myFinishedWithin48h}/{allMyFinished.length} concluídos em 2 dias úteis (17h36min)</p>
             </CardContent>
           </Card>
           <Card>
@@ -354,6 +412,17 @@ const AnalystPanel = () => {
           </Card>
         </div>
 
+        {/* Global search */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por ID, base ou solicitante em todas as abas..."
+            value={globalSearch}
+            onChange={e => setGlobalSearch(e.target.value)}
+            className="pl-9 h-9"
+          />
+        </div>
+
         <Tabs defaultValue="unassigned" className="w-full">
           <TabsList>
             <TabsTrigger value="unassigned">Não Atribuídos ({unassignedTotal})</TabsTrigger>
@@ -364,23 +433,25 @@ const AnalystPanel = () => {
           <TabsContent value="unassigned">
             <Card>
               <CardContent className="pt-6">
-                {unassignedTickets.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-8 text-center">Nenhum chamado não atribuído</p>
+                {sortedUnassigned.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-8 text-center">
+                    {searchLower ? `Nenhum resultado para "${globalSearch}"` : 'Nenhum chamado não atribuído'}
+                  </p>
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>ID</TableHead>
-                        <TableHead>Base</TableHead>
-                        <TableHead>Solicitante</TableHead>
-                        <TableHead>Prioridade</TableHead>
+                        <SortableHead col="id">ID</SortableHead>
+                        <SortableHead col="base_name">Base</SortableHead>
+                        <SortableHead col="requester_name">Solicitante</SortableHead>
+                        <SortableHead col="priority">Prioridade</SortableHead>
                         <TableHead>Tipo</TableHead>
-                        <TableHead>Data</TableHead>
+                        <SortableHead col="created_at">Data</SortableHead>
                         <TableHead>Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {unassignedTickets.map(ticket => (
+                      {sortedUnassigned.map(ticket => (
                         <TableRow key={ticket.id}>
                           <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
                           <TableCell>{ticket.base_name}</TableCell>
@@ -456,27 +527,29 @@ const AnalystPanel = () => {
 
             <Card>
               <CardContent className="pt-6">
-                {filteredOpen.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-8 text-center">Nenhum chamado em aberto</p>
+                {sortedOpen.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-8 text-center">
+                    {searchLower ? `Nenhum resultado para "${globalSearch}"` : 'Nenhum chamado em aberto'}
+                  </p>
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead></TableHead>
-                        <TableHead>ID</TableHead>
-                        <TableHead>Base</TableHead>
-                        <TableHead>Solicitante</TableHead>
-                        <TableHead>Prioridade</TableHead>
-                         <TableHead>Tipo</TableHead>
-                         <TableHead>Status</TableHead>
-                         <TableHead>Anexo</TableHead>
-                         <TableHead>Tempo</TableHead>
-                         <TableHead>Data</TableHead>
-                         <TableHead>Ações</TableHead>
+                        <SortableHead col="id">ID</SortableHead>
+                        <SortableHead col="base_name">Base</SortableHead>
+                        <SortableHead col="requester_name">Solicitante</SortableHead>
+                        <SortableHead col="priority">Prioridade</SortableHead>
+                        <TableHead>Tipo</TableHead>
+                        <SortableHead col="status">Status</SortableHead>
+                        <TableHead>Anexo</TableHead>
+                        <SortableHead col="total_execution_seconds">Tempo</SortableHead>
+                        <SortableHead col="created_at">Data</SortableHead>
+                        <TableHead>Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredOpen.map(ticket => (
+                      {sortedOpen.map(ticket => (
                         <React.Fragment key={ticket.id}>
                           <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
                             <TableCell>
@@ -567,46 +640,27 @@ const AnalystPanel = () => {
           <TabsContent value="finished">
             <Card>
               <CardContent className="pt-6 space-y-4">
-                <div className="relative max-w-sm">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar por ID, base ou solicitante..."
-                    value={finishedSearch}
-                    onChange={e => setFinishedSearch(e.target.value)}
-                    className="pl-9 h-9"
-                  />
-                </div>
-                {finishedTickets.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-8 text-center">Nenhum chamado finalizado</p>
-                ) : (() => {
-                  const searchLower = finishedSearch.toLowerCase().trim();
-                  const filtered = searchLower
-                    ? finishedTickets.filter(t =>
-                        t.id.toLowerCase().includes(searchLower) ||
-                        t.base_name.toLowerCase().includes(searchLower) ||
-                        t.requester_name.toLowerCase().includes(searchLower)
-                      )
-                    : finishedTickets;
-                  if (filtered.length === 0) return (
-                    <p className="text-sm text-muted-foreground py-8 text-center">Nenhum resultado para "{finishedSearch}"</p>
-                  );
-                  return (
+                {sortedFinished.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-8 text-center">
+                    {searchLower ? `Nenhum resultado para "${globalSearch}"` : 'Nenhum chamado finalizado'}
+                  </p>
+                ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead></TableHead>
-                        <TableHead>ID</TableHead>
-                        <TableHead>Base</TableHead>
-                        <TableHead>Solicitante</TableHead>
-                        <TableHead>Prioridade</TableHead>
+                        <SortableHead col="id">ID</SortableHead>
+                        <SortableHead col="base_name">Base</SortableHead>
+                        <SortableHead col="requester_name">Solicitante</SortableHead>
+                        <SortableHead col="priority">Prioridade</SortableHead>
                         <TableHead>Tipo</TableHead>
-                        <TableHead>Execução</TableHead>
+                        <SortableHead col="total_execution_seconds">Execução</SortableHead>
                         <TableHead>Pausado</TableHead>
-                        <TableHead>Finalizado</TableHead>
+                        <SortableHead col="created_at">Finalizado</SortableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filtered.map(ticket => (
+                      {sortedFinished.map(ticket => (
                         <React.Fragment key={ticket.id}>
                           <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
                             <TableCell>
@@ -658,8 +712,7 @@ const AnalystPanel = () => {
                       ))}
                     </TableBody>
                   </Table>
-                  );
-                })()}
+                )}
                 <PaginationControls page={finishedPage} totalPages={finishedTotalPages} setPage={setFinishedPage} />
               </CardContent>
             </Card>

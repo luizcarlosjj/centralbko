@@ -10,7 +10,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Play, Target } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Play, Target, Trash2, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, Profile, PauseLog } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
 import { Link } from 'react-router-dom';
@@ -33,6 +37,9 @@ const statusColor: Record<string, string> = {
   finalizado: 'bg-success/10 text-success border-success/20',
 };
 
+type SortColumn = 'id' | 'base_name' | 'requester_name' | 'priority' | 'status' | 'created_at' | 'total_execution_seconds';
+type SortDirection = 'asc' | 'desc';
+
 const SupervisorPanel = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -45,6 +52,13 @@ const SupervisorPanel = () => {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [page, setPage] = useState(0);
+  const [searchText, setSearchText] = useState('');
+  const [sortColumn, setSortColumn] = useState<SortColumn>('created_at');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Delete
+  const [deleteTicketId, setDeleteTicketId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Expanded rows
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -90,7 +104,7 @@ const SupervisorPanel = () => {
     staleTime: 30_000,
   });
 
-  // Separate query for global status counts (not affected by pagination or filters)
+  // Separate query for global status counts
   const { data: statusCounts } = useQuery({
     queryKey: ['supervisor-status-counts'],
     queryFn: async () => {
@@ -110,7 +124,7 @@ const SupervisorPanel = () => {
     staleTime: 30_000,
   });
 
-  // Global query for all finished tickets (for avg time and Meta 48h)
+  // Global query for all finished tickets (for avg time and Meta)
   const { data: allFinishedTickets = [] } = useQuery({
     queryKey: ['supervisor-all-finished'],
     queryFn: async () => {
@@ -175,7 +189,6 @@ const SupervisorPanel = () => {
               setPauseReasonNames(prev => ({ ...prev, ...Object.fromEntries(reasons.map(r => [r.id, r.title])) }));
             }
           }
-          // Fetch pause responses for this ticket
           const logIds = logs.map(l => l.id);
           if (logIds.length > 0) {
             const { data: responses } = await supabase
@@ -212,7 +225,6 @@ const SupervisorPanel = () => {
 
   const resumeTicket = async (ticket: Ticket) => {
     if (!user) return;
-    // Find active pause log
     const { data: activeLogs } = await supabase
       .from('pause_logs')
       .select('id, pause_started_at, paused_seconds')
@@ -248,6 +260,41 @@ const SupervisorPanel = () => {
     queryClient.invalidateQueries({ queryKey: ['supervisor-status-counts'] });
   };
 
+  const deleteTicket = async (ticketId: string) => {
+    setDeleting(true);
+    try {
+      // Get pause_log ids
+      const { data: logs } = await supabase.from('pause_logs').select('id').eq('ticket_id', ticketId);
+      const logIds = (logs || []).map(l => l.id);
+
+      if (logIds.length > 0) {
+        // Get pause_response ids
+        const { data: responses } = await supabase.from('pause_responses').select('id').in('pause_log_id', logIds);
+        const responseIds = (responses || []).map(r => r.id);
+
+        if (responseIds.length > 0) {
+          await supabase.from('pause_response_files').delete().in('pause_response_id', responseIds);
+        }
+        await supabase.from('pause_responses').delete().eq('ticket_id', ticketId);
+        await supabase.from('pause_evidences').delete().eq('ticket_id', ticketId);
+        await supabase.from('pause_logs').delete().eq('ticket_id', ticketId);
+      }
+
+      await supabase.from('ticket_status_logs').delete().eq('ticket_id', ticketId);
+      await supabase.from('tickets').delete().eq('id', ticketId);
+
+      toast({ title: 'Chamado excluído com sucesso' });
+      queryClient.invalidateQueries({ queryKey: ['supervisor-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['supervisor-status-counts'] });
+      queryClient.invalidateQueries({ queryKey: ['supervisor-all-finished'] });
+    } catch (err) {
+      toast({ title: 'Erro ao excluir', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setDeleting(false);
+      setDeleteTicketId(null);
+    }
+  };
+
   useEffect(() => {
     const channel = supabase
       .channel('supervisor-tickets-realtime')
@@ -267,13 +314,53 @@ const SupervisorPanel = () => {
     ? Math.round(allFinishedTickets.reduce((a, t) => a + (t.total_execution_seconds || 0), 0) / allFinishedTickets.length)
     : 0;
 
-  const FORTY_EIGHT_HOURS_BIZ = 48 * 3600;
+  const FORTY_EIGHT_HOURS_BIZ = 63360; // 2 dias úteis = 17h36min
   const finishedWithin48h = allFinishedTickets.filter(t => {
     if (!t.finished_at) return false;
     const bizSecs = calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at));
     return bizSecs <= FORTY_EIGHT_HOURS_BIZ;
   }).length;
   const meta48hRate = allFinishedTickets.length > 0 ? ((finishedWithin48h / allFinishedTickets.length) * 100).toFixed(1) : '0.0';
+
+  // Search & sort
+  const searchLower = searchText.toLowerCase().trim();
+  const filteredTickets = searchLower
+    ? tickets.filter(t =>
+        t.id.toLowerCase().includes(searchLower) ||
+        t.base_name.toLowerCase().includes(searchLower) ||
+        t.requester_name.toLowerCase().includes(searchLower)
+      )
+    : tickets;
+
+  const priorityOrder: Record<string, number> = { urgente: 0, alta: 1, media: 2, baixa: 3 };
+
+  const sortedTickets = [...filteredTickets].sort((a, b) => {
+    let cmp = 0;
+    switch (sortColumn) {
+      case 'id': cmp = a.id.localeCompare(b.id); break;
+      case 'base_name': cmp = a.base_name.localeCompare(b.base_name); break;
+      case 'requester_name': cmp = a.requester_name.localeCompare(b.requester_name); break;
+      case 'priority': cmp = (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9); break;
+      case 'status': cmp = a.status.localeCompare(b.status); break;
+      case 'created_at': cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime(); break;
+      case 'total_execution_seconds': cmp = (a.total_execution_seconds || 0) - (b.total_execution_seconds || 0); break;
+    }
+    return sortDirection === 'asc' ? cmp : -cmp;
+  });
+
+  const toggleSort = (col: SortColumn) => {
+    if (sortColumn === col) {
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(col);
+      setSortDirection('asc');
+    }
+  };
+
+  const SortIcon = ({ col }: { col: SortColumn }) => {
+    if (sortColumn !== col) return <ArrowUpDown className="h-3 w-3 ml-1 inline opacity-40" />;
+    return sortDirection === 'asc' ? <ArrowUp className="h-3 w-3 ml-1 inline" /> : <ArrowDown className="h-3 w-3 ml-1 inline" />;
+  };
 
   return (
     <AppLayout>
@@ -323,14 +410,25 @@ const SupervisorPanel = () => {
           </Card>
           <Card className="border-primary/30 bg-primary/5">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-primary">Meta 48h</CardTitle>
+              <CardTitle className="text-sm font-medium text-primary">Meta 2 Dias Úteis</CardTitle>
               <Target className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
               <p className="text-3xl font-bold text-primary">{meta48hRate}%</p>
-              <p className="text-[10px] text-muted-foreground mt-1">{finishedWithin48h}/{allFinishedTickets.length} em 48h úteis</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{finishedWithin48h}/{allFinishedTickets.length} em 2 dias úteis (17h36min)</p>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Search bar */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por ID, base ou solicitante..."
+            value={searchText}
+            onChange={e => setSearchText(e.target.value)}
+            className="pl-9 h-9"
+          />
         </div>
 
         <Card>
@@ -395,20 +493,20 @@ const SupervisorPanel = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead></TableHead>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Base</TableHead>
-                  <TableHead>Solicitante</TableHead>
-                  <TableHead>Prioridade</TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('id')}>ID <SortIcon col="id" /></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('base_name')}>Base <SortIcon col="base_name" /></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('requester_name')}>Solicitante <SortIcon col="requester_name" /></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('priority')}>Prioridade <SortIcon col="priority" /></TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('status')}>Status <SortIcon col="status" /></TableHead>
                   <TableHead>Backoffice</TableHead>
-                  <TableHead>Tempo</TableHead>
-                  <TableHead>Data</TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('total_execution_seconds')}>Tempo <SortIcon col="total_execution_seconds" /></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('created_at')}>Data <SortIcon col="created_at" /></TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tickets.map(ticket => (
+                {sortedTickets.map(ticket => (
                   <React.Fragment key={ticket.id}>
                     <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
                       <TableCell>
@@ -424,22 +522,26 @@ const SupervisorPanel = () => {
                       <TableCell><LiveTimer ticket={ticket} /></TableCell>
                       <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
                       <TableCell onClick={e => e.stopPropagation()}>
-                        {ticket.status === 'finalizado' && (
-                          <Button size="sm" variant="outline" onClick={() => reopenTicket(ticket)}>
-                            <RotateCcw className="mr-1 h-3 w-3" /> Reabrir
+                        <div className="flex gap-1">
+                          {ticket.status === 'finalizado' && (
+                            <Button size="sm" variant="outline" onClick={() => reopenTicket(ticket)}>
+                              <RotateCcw className="mr-1 h-3 w-3" /> Reabrir
+                            </Button>
+                          )}
+                          {ticket.status === 'pausado' && (
+                            <Button size="sm" variant="outline" onClick={() => resumeTicket(ticket)}>
+                              <Play className="mr-1 h-3 w-3" /> Retomar
+                            </Button>
+                          )}
+                          <Button size="sm" variant="destructive" onClick={() => setDeleteTicketId(ticket.id)}>
+                            <Trash2 className="h-3 w-3" />
                           </Button>
-                        )}
-                        {ticket.status === 'pausado' && (
-                          <Button size="sm" variant="outline" onClick={() => resumeTicket(ticket)}>
-                            <Play className="mr-1 h-3 w-3" /> Retomar
-                          </Button>
-                        )}
+                        </div>
                       </TableCell>
                     </TableRow>
                     {expandedRows.has(ticket.id) && (
                       <TableRow>
                         <TableCell colSpan={11} className="bg-muted/30 p-4">
-                          {/* Ticket details */}
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-xs">
                             <div>
                               <span className="text-muted-foreground">Criação:</span>
@@ -511,7 +613,6 @@ const SupervisorPanel = () => {
                                       <p className="mt-1 bg-muted/30 rounded p-2">{log.description_text}</p>
                                     </div>
                                   )}
-                                  {/* Pause responses from analyst */}
                                   {(pauseResponses[log.id] || []).length > 0 && (
                                     <div className="border-t border-border pt-2 mt-2">
                                       <span className="text-muted-foreground font-medium">Resposta do Analista:</span>
@@ -537,7 +638,7 @@ const SupervisorPanel = () => {
                 ))}
               </TableBody>
             </Table>
-            {tickets.length === 0 && <p className="text-center text-sm text-muted-foreground py-8">Nenhum chamado encontrado</p>}
+            {sortedTickets.length === 0 && <p className="text-center text-sm text-muted-foreground py-8">Nenhum chamado encontrado</p>}
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-2 pt-4">
                 <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>
@@ -552,6 +653,27 @@ const SupervisorPanel = () => {
           </CardContent>
         </Card>
       </div>
+
+      <AlertDialog open={!!deleteTicketId} onOpenChange={(open) => { if (!open) setDeleteTicketId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Chamado</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir este chamado? Esta ação não pode ser desfeita. Todos os dados relacionados (pausas, evidências, logs) serão removidos.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteTicketId && deleteTicket(deleteTicketId)}
+            >
+              {deleting ? 'Excluindo...' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 };

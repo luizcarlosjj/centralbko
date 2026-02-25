@@ -78,7 +78,7 @@ const MetricsDashboard = () => {
   const conclusionRate = total > 0 ? (((finished + paused) / total) * 100).toFixed(1) : '0.0';
 
   // Meta 48h: finalizados em até 48h úteis / total finalizados
-  const FORTY_EIGHT_HOURS_BIZ = 48 * 3600; // 172800 business seconds
+  const FORTY_EIGHT_HOURS_BIZ = 63360; // 2 dias úteis = 17h36min
   const finishedWithin48h = finishedTickets.filter(t => {
     if (!t.finished_at) return false;
     const bizSecs = calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at));
@@ -344,7 +344,7 @@ const MetricsDashboard = () => {
                     <span>Pausa média: <span className="font-medium text-foreground">{formatTime(b.tempoPausaMedio)}</span></span>
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    <span>{b.within48h} de {b.finalizados} concluídos em até 48h úteis</span>
+                    <span>{b.within48h} de {b.finalizados} concluídos em até 2 dias úteis</span>
                   </div>
                 </div>
               ))}
@@ -391,12 +391,12 @@ const MetricsDashboard = () => {
           </Card>
           <Card className="border-primary/30 bg-primary/5">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-medium text-primary">Meta 48h</CardTitle>
+              <CardTitle className="text-xs font-medium text-primary">Meta 2 Dias Úteis</CardTitle>
               <Target className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-bold text-primary">{meta48hRate}%</p>
-              <p className="text-[10px] text-muted-foreground mt-1">{finishedWithin48h} concl. em 48h</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{finishedWithin48h} concl. em 2 dias úteis (17h36min)</p>
             </CardContent>
           </Card>
           <Card>
