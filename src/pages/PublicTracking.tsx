@@ -135,7 +135,7 @@ const PublicTracking = () => {
             <div className="space-y-2">
               <Select value={selectedRequester} onValueChange={setSelectedRequester}>
                 <SelectTrigger><SelectValue placeholder="Selecione o solicitante" /></SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[40vh] overflow-y-auto" position="popper" sideOffset={4}>
                   {requesters.map(r => (
                     <SelectItem key={r.id} value={r.name}>{r.name}</SelectItem>
                   ))}
