@@ -1,109 +1,78 @@
 
 
-# Melhorias de Correcao e Sustentacao
+# Plano: Exportacao de Dados e Backup Completo na Tela de Importacao em Massa
 
-## 1. Responsividade do Select na tela PublicTracking
+## Contexto
 
-**Problema:** O `SelectContent` dentro do Dialog pode ficar cortado ou com scroll ruim em mobile.
+A tela de BulkImport atualmente so permite importar e excluir chamados. O usuario precisa de ferramentas de exportacao para backup e migracao futura.
 
-**Solucao:**
-- No `PublicTracking.tsx`, adicionar classes ao `SelectContent` para limitar altura e garantir scroll: `className="max-h-[40vh] overflow-y-auto"`
-- Tambem no modal, caso o select de solicitante esteja sendo usado dentro do dialog, garantir `position="popper"` e `sideOffset` adequado
+## Funcionalidades a Implementar
 
-**Arquivo:** `src/pages/PublicTracking.tsx`
+### 1. Botao "Exportar Chamados (Excel)"
+- Exporta TODOS os tickets da tabela `tickets` para um arquivo `.xlsx` no formato do modelo existente
+- Colunas: Solicitante, Base, Data Criacao (com hora), Data Conclusao (com hora), Hora Abertura, Hora Encerramento, Tempo Execucao, Status, Tipo, Responsavel, Nivel do Setup, Time, Prioridade, Descricao
+- Os campos "Hora Abertura" e "Hora Encerramento" serao extraidos de `created_at` e `finished_at` respectivamente (formato HH:MM:SS)
+- Busca o nome do responsavel via join com `profiles` usando `assigned_analyst_id`
+- Nome do arquivo: `chamados_export_YYYY-MM-DD.xlsx`
 
----
+### 2. Botao "Exportar Dados do Sistema (SQL)"
+- Gera um arquivo `.sql` contendo INSERTs de todas as tabelas de configuracao do sistema:
+  - `pause_reasons` (motivos de pausa)
+  - `setup_levels` (niveis de setup)
+  - `teams` (times)
+  - `ticket_types` (tipos de chamado)
+  - `requesters` (solicitantes)
+  - `profiles` (perfis de usuario)
+  - `user_roles` (papeis)
+  - `pause_logs` (logs de pausa)
+  - `pause_evidences` (evidencias)
+  - `pause_responses` + `pause_response_files`
+  - `ticket_status_logs` (historico de status)
+  - `assignment_control`
+- Cada tabela precedida de comentario SQL com nome e quantidade de registros
+- Formato: INSERTs individuais com valores escapados
+- Nome do arquivo: `backup_sistema_YYYY-MM-DD.sql`
 
-## 2. Unidades de tempo na tela de Metricas
+### 3. Atualizacao do Modelo de Planilha
+- Adicionar colunas "Hora Abertura" e "Hora Encerramento" ao template
+- Atualizar exemplos com horarios (ex: `08:59:52`, `16:30:00`)
 
-**Problema:** O `formatTime` atual retorna `HH:MM:SS` sem indicar o que e hora, minuto ou segundo. Fica ambiguo.
+## Alteracoes no Layout
 
-**Solucao:** Alterar a funcao `formatTime` no `MetricsDashboard.tsx` para retornar formato legivel:
-- Se >= 1 dia (86400s): `Xd Xh Xmin`
-- Se >= 1 hora (3600s): `Xh Xmin`
-- Se >= 1 minuto: `Xmin`
-- Se < 1 minuto: `< 1min`
+A area de cabecalho sera expandida para conter 3 botoes ao lado do titulo:
+- **Modelo** (ja existente) - download do template
+- **Exportar Chamados** (novo) - icone FileSpreadsheet, cor verde/outline
+- **Exportar SQL** (novo) - icone Database, cor outline
 
-Isso afeta os cards de "Exec. Media" e "Pausa Media", o ranking backoffice/analista, e as tabelas de pausas.
+## Detalhes Tecnicos
 
-**Arquivo:** `src/pages/MetricsDashboard.tsx`
+### Arquivo modificado
+- `src/pages/BulkImport.tsx`
 
----
+### Dependencias
+- `xlsx` (ja instalado) para gerar o Excel
+- Nenhuma nova dependencia necessaria
+- O SQL sera gerado como string pura e baixado via `Blob` + `URL.createObjectURL`
 
-## 3. Remover Round-Robin e implementar atribuicao manual
-
-**Problema:** Atualmente existe um trigger `auto_assign_ticket` que faz round-robin automatico. O usuario quer atribuicao manual onde o backoffice principal (Andre) recebe tudo e pode reatribuir para outro backoffice.
-
-### 3a. Remover trigger round-robin (migracao SQL)
-
-Criar migracao para:
-```sql
-DROP TRIGGER IF EXISTS auto_assign_ticket_trigger ON public.tickets;
-DROP FUNCTION IF EXISTS public.auto_assign_ticket();
+### Estrategia de exportacao de chamados
+```text
+1. Fetch tickets (sem limite de 1000 - paginar se necessario)
+2. Fetch profiles para mapear analyst_id -> nome
+3. Montar array de linhas
+4. Gerar XLSX com xlsx library
+5. Trigger download
 ```
 
-Os tickets passarao a ser criados com `status = 'nao_iniciado'` e `assigned_analyst_id = NULL` (defaults da tabela).
-
-### 3b. Tela do Backoffice: botao "Assumir" e "Atribuir"
-
-No `BackofficePanel.tsx`:
-- Adicionar uma nova aba/secao "Nao Atribuidos" que lista tickets com `status = 'nao_iniciado'` e `assigned_analyst_id IS NULL`
-- Botao "Assumir" — atribui o ticket para si mesmo, muda status para `em_andamento` e seta `started_at = now()`
-- Botao "Atribuir" — abre um select com lista de backoffices ativos, permite escolher outro backoffice para receber o ticket
-
-Para isso, sera necessario:
-- Query adicional para buscar tickets nao atribuidos (acessivel por backoffice)
-- Query para listar usuarios com role `backoffice` (para o select de atribuicao)
-- Nova RLS policy ou ajustar a existente para que backoffice possa ver tickets nao atribuidos (`assigned_analyst_id IS NULL`)
-
-### 3c. RLS - Permitir backoffice ver tickets nao atribuidos
-
-Atualmente a policy `Role-based ticket visibility` para backoffice exige `assigned_analyst_id = auth.uid()`. Precisamos expandir para incluir `assigned_analyst_id IS NULL`:
-
-```sql
-DROP POLICY IF EXISTS "Role-based ticket visibility" ON public.tickets;
-CREATE POLICY "Role-based ticket visibility" ON public.tickets
-  FOR SELECT TO authenticated
-  USING (
-    has_role(auth.uid(), 'supervisor'::app_role)
-    OR (has_role(auth.uid(), 'backoffice'::app_role) AND (assigned_analyst_id = auth.uid() OR assigned_analyst_id IS NULL))
-    OR (has_role(auth.uid(), 'analyst'::app_role) AND requester_user_id = auth.uid())
-  );
+### Estrategia de exportacao SQL
+```text
+1. Fetch cada tabela sequencialmente
+2. Para cada registro, gerar INSERT INTO ... VALUES (...)
+3. Escapar aspas simples nos valores string
+4. Concatenar tudo em uma string
+5. Gerar arquivo .sql via Blob download
 ```
 
-Mesma logica para UPDATE policy — backoffice precisa poder atualizar tickets nao atribuidos para assumir:
-
-```sql
-DROP POLICY IF EXISTS "Role-based ticket update" ON public.tickets;
-CREATE POLICY "Role-based ticket update" ON public.tickets
-  FOR UPDATE TO authenticated
-  USING (
-    has_role(auth.uid(), 'supervisor'::app_role)
-    OR (has_role(auth.uid(), 'backoffice'::app_role) AND (assigned_analyst_id = auth.uid() OR assigned_analyst_id IS NULL))
-    OR (has_role(auth.uid(), 'analyst'::app_role) AND requester_user_id = auth.uid())
-  );
-```
-
-### 3d. UI do BackofficePanel
-
-Adicionar nova aba "Nao Atribuidos" com:
-- Tabela com colunas: ID, Base, Solicitante, Prioridade, Tipo, Data, Acoes
-- Acoes: "Assumir" (botao primario) e "Atribuir" (botao outline que abre dialog com select de backoffices)
-- Dialog de atribuicao: select com lista de backoffices, botao confirmar
-
-### Detalhes Tecnicos
-
-**Migracao SQL:**
-- Drop trigger e funcao round-robin
-- Atualizar RLS policies de SELECT e UPDATE na tabela tickets
-
-**Arquivos a modificar:**
-1. `src/pages/MetricsDashboard.tsx` — formatTime com unidades claras (d, h, min)
-2. `src/pages/PublicTracking.tsx` — responsividade do SelectContent
-3. `src/pages/BackofficePanel.tsx` — nova aba "Nao Atribuidos", botoes "Assumir" e "Atribuir", query de backoffices
-
-**Nenhuma alteracao em:**
-- Fluxo do analista
-- Fluxo do supervisor
-- Edge functions existentes
+### Paginacao para superar limite de 1000 registros
+- Usar loop com `.range(offset, offset + 999)` ate receber menos de 1000 resultados
+- Aplicar para tickets e ticket_status_logs (tabelas que podem exceder 1000)
 
