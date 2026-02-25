@@ -50,10 +50,10 @@ function getHolidays(year: number): Set<string> {
     holidays.add(dateKey(new Date(year, month, day)));
   }
   const easter = getEasterDate(year);
-  holidays.add(dateKey(addDays(easter, -48))); // Carnival Monday
-  holidays.add(dateKey(addDays(easter, -47))); // Carnival Tuesday
-  holidays.add(dateKey(addDays(easter, -2)));  // Good Friday
-  holidays.add(dateKey(addDays(easter, 60)));  // Corpus Christi
+  holidays.add(dateKey(addDays(easter, -48)));
+  holidays.add(dateKey(addDays(easter, -47)));
+  holidays.add(dateKey(addDays(easter, -2)));
+  holidays.add(dateKey(addDays(easter, 60)));
   return holidays;
 }
 
@@ -68,11 +68,9 @@ function isHoliday(date: Date): boolean {
 function calculateBusinessSeconds(startUtc: Date, endUtc: Date): number {
   const start = toBrazilTime(startUtc);
   const end = toBrazilTime(endUtc);
-  
   if (end <= start) return 0;
   let totalSeconds = 0;
   const current = new Date(start);
-
   while (current < end) {
     if (isHoliday(current)) {
       current.setDate(current.getDate() + 1);
@@ -83,18 +81,47 @@ function calculateBusinessSeconds(startUtc: Date, endUtc: Date): number {
     if (mins < WORK_START) { current.setHours(8, 0, 0, 0); continue; }
     if (mins >= WORK_END) { current.setDate(current.getDate() + 1); current.setHours(8, 0, 0, 0); continue; }
     if (mins >= LUNCH_START && mins < LUNCH_END) { current.setHours(13, 12, 0, 0); continue; }
-
     const nextBoundary = mins < LUNCH_START ? LUNCH_START : WORK_END;
     const nextBoundaryDate = new Date(current);
     nextBoundaryDate.setHours(Math.floor(nextBoundary / 60), nextBoundary % 60, 0, 0);
-
     const periodEnd = end < nextBoundaryDate ? end : nextBoundaryDate;
     totalSeconds += Math.max(0, Math.floor((periodEnd.getTime() - current.getTime()) / 1000));
-
     if (end <= nextBoundaryDate) break;
     current.setHours(Math.floor(nextBoundary / 60), nextBoundary % 60, 0, 0);
   }
   return totalSeconds;
+}
+
+/**
+ * Detect if a finished_at date has month/day swapped from import.
+ * Pattern: created_at is in February (month 2), but finished_at shows month > 2
+ * and finished_at.day <= 12 (could have been a month number).
+ * Swapping month↔day should give a date in Feb that is >= created_at.
+ */
+function detectAndFixSwappedDate(createdAt: Date, finishedAt: Date): Date | null {
+  const cMonth = createdAt.getUTCMonth() + 1; // 1-indexed
+  const fMonth = finishedAt.getUTCMonth() + 1;
+  const fDay = finishedAt.getUTCDate();
+
+  // Only fix if finished month is far from created month and day <= 12
+  if (fMonth <= cMonth) return null; // same or earlier month - likely fine
+  if (fDay > 12) return null; // day can't be a valid month
+  
+  // Swap: use fDay as month, fMonth as day
+  const newMonth = fDay; // the original day becomes the month
+  const newDay = fMonth; // the original month becomes the day
+
+  // Validate the swapped date
+  const swapped = new Date(finishedAt);
+  swapped.setUTCMonth(newMonth - 1, newDay);
+  
+  // Check it's valid and makes sense (>= created, not in the future relative to now)
+  if (swapped < createdAt) return null;
+  // The swapped date should be close to created_at (within ~30 days)
+  const diffDays = (swapped.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+  if (diffDays > 45) return null; // too far, might not be a swap
+  
+  return swapped;
 }
 
 Deno.serve(async (req) => {
@@ -106,12 +133,13 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // Fetch ALL finalized tickets
     let allTickets: any[] = [];
     let offset = 0;
     while (true) {
       const { data, error } = await supabase
         .from("tickets")
-        .select("id, started_at, finished_at, total_execution_seconds")
+        .select("id, base_name, created_at, started_at, finished_at, total_execution_seconds")
         .eq("status", "finalizado")
         .not("started_at", "is", null)
         .not("finished_at", "is", null)
@@ -123,14 +151,42 @@ Deno.serve(async (req) => {
       offset += 1000;
     }
 
-    const results: { id: string; old: number; new_val: number; started: string; finished: string }[] = [];
-    let updated = 0;
+    const dateFixed: any[] = [];
+    const timeFixed: any[] = [];
+    let totalDateFixes = 0;
+    let totalTimeFixes = 0;
 
     for (const ticket of allTickets) {
-      const bizSecs = calculateBusinessSeconds(
-        new Date(ticket.started_at),
-        new Date(ticket.finished_at)
-      );
+      const createdAt = new Date(ticket.created_at);
+      let finishedAt = new Date(ticket.finished_at);
+      let dateWasFixed = false;
+
+      // Step 1: Fix swapped dates
+      const correctedDate = detectAndFixSwappedDate(createdAt, finishedAt);
+      if (correctedDate) {
+        const oldFinished = ticket.finished_at;
+        finishedAt = correctedDate;
+        dateWasFixed = true;
+        totalDateFixes++;
+
+        // Update finished_at in DB
+        const { error } = await supabase
+          .from("tickets")
+          .update({ finished_at: correctedDate.toISOString() })
+          .eq("id", ticket.id);
+        if (error) throw error;
+
+        dateFixed.push({
+          id: ticket.id,
+          base_name: ticket.base_name,
+          old_finished: oldFinished,
+          new_finished: correctedDate.toISOString(),
+        });
+      }
+
+      // Step 2: Recalculate business seconds
+      const startedAt = new Date(ticket.started_at);
+      const bizSecs = calculateBusinessSeconds(startedAt, finishedAt);
 
       if (bizSecs !== ticket.total_execution_seconds) {
         const { error } = await supabase
@@ -138,14 +194,15 @@ Deno.serve(async (req) => {
           .update({ total_execution_seconds: bizSecs })
           .eq("id", ticket.id);
         if (error) throw error;
-        results.push({
+
+        timeFixed.push({
           id: ticket.id,
-          old: ticket.total_execution_seconds,
-          new_val: bizSecs,
-          started: ticket.started_at,
-          finished: ticket.finished_at,
+          base_name: ticket.base_name,
+          old_seconds: ticket.total_execution_seconds,
+          new_seconds: bizSecs,
+          date_was_fixed: dateWasFixed,
         });
-        updated++;
+        totalTimeFixes++;
       }
     }
 
@@ -153,8 +210,10 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         total_checked: allTickets.length,
-        total_updated: updated,
-        changes: results,
+        date_fixes: totalDateFixes,
+        time_fixes: totalTimeFixes,
+        date_changes: dateFixed,
+        time_changes: timeFixed,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
