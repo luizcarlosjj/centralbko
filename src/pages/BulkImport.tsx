@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -20,7 +20,10 @@ import {
 } from '@/components/ui/alert-dialog';
 import * as XLSX from 'xlsx';
 
-const ANDRE_ID = "2b9383d5-fc10-4d2e-9e38-1a9e88be1181";
+interface BackofficeUser {
+  id: string;
+  name: string;
+}
 
 // Expected column names (case-insensitive, trimmed)
 const EXPECTED_COLUMNS = [
@@ -259,7 +262,28 @@ const BulkImport: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<{ successCount: number; errorCount: number; errors: string[] } | null>(null);
+  const [backofficeUsers, setBackofficeUsers] = useState<BackofficeUser[]>([]);
   const { toast } = useToast();
+
+  useEffect(() => {
+    const fetchBackofficeUsers = async () => {
+      const { data: roles } = await supabase
+        .from('user_roles')
+        .select('user_id')
+        .eq('role', 'backoffice');
+      if (roles && roles.length > 0) {
+        const userIds = roles.map(r => r.user_id);
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, name')
+          .in('id', userIds);
+        if (profiles) {
+          setBackofficeUsers(profiles.map(p => ({ id: p.id, name: p.name })));
+        }
+      }
+    };
+    fetchBackofficeUsers();
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -331,6 +355,14 @@ const BulkImport: React.FC = () => {
     setProgress(10);
 
     try {
+      const findUserId = (name: string): string | null => {
+        if (!name) return null;
+        const lower = name.toLowerCase().trim();
+        if (lower === 'não atribuído' || lower === 'nao atribuido' || lower === 'sem responsável' || lower === 'sem responsavel') return null;
+        const match = backofficeUsers.find(u => u.name.toLowerCase().trim() === lower);
+        return match ? match.id : null;
+      };
+
       const processedData = validation.rows.map((r) => ({
         requester_name: r.requester_name,
         base_name: r.base_name,
@@ -339,7 +371,7 @@ const BulkImport: React.FC = () => {
         execution_time: r.execution_time,
         status: mapStatus(r.status_raw),
         type: mapType(r.type_raw || "outro"),
-        assigned_analyst_id: r.assigned ? ANDRE_ID : null,
+        assigned_analyst_id: findUserId(r.assigned),
       }));
 
       const batchSize = 20;
@@ -387,6 +419,7 @@ const BulkImport: React.FC = () => {
     const ws = XLSX.utils.aoa_to_sheet([
       ['Solicitante', 'Base', 'Data Criação', 'Data Conclusão', 'Tempo Execução', 'Status', 'Tipo', 'Responsável'],
       ['João', '123456 - Empresa Exemplo', '01/03/2026', '02/03/2026', '02:30', 'Concluido', 'Cliente', 'André'],
+      ['Maria', '789012 - Outra Empresa', '03/03/2026', '', '', 'Não iniciado', 'Equipamento', 'Não atribuído'],
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Importação');
@@ -412,7 +445,7 @@ const BulkImport: React.FC = () => {
           <CardHeader>
             <CardTitle>1. Enviar Planilha</CardTitle>
             <CardDescription>
-              Formatos aceitos: .xlsx, .xls, .csv — Colunas obrigatórias: Solicitante, Base, Status
+              Formatos aceitos: .xlsx, .xls, .csv — Colunas obrigatórias: Solicitante, Base, Status. Use "Não atribuído" na coluna Responsável para deixar sem dono.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -513,7 +546,7 @@ const BulkImport: React.FC = () => {
               {validation.rows.length > 0 && (
                 <div>
                   <p className="text-sm font-medium mb-2">Pré-visualização ({Math.min(validation.rows.length, 10)} de {validation.rows.length}):</p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
                     <div className="text-center p-2 rounded-lg bg-muted">
                       <div className="text-lg font-bold">{validation.rows.length}</div>
                       <div className="text-xs text-muted-foreground">Total</div>
@@ -530,6 +563,10 @@ const BulkImport: React.FC = () => {
                       <div className="text-lg font-bold">{validation.rows.filter(r => ['em_andamento', 'nao_iniciado'].includes(mapStatus(r.status_raw))).length}</div>
                       <div className="text-xs text-muted-foreground">Em aberto</div>
                     </div>
+                    <div className="text-center p-2 rounded-lg bg-muted">
+                      <div className="text-lg font-bold">{validation.rows.filter(r => !r.assigned || r.assigned.toLowerCase().trim() === 'não atribuído' || r.assigned.toLowerCase().trim() === 'nao atribuido').length}</div>
+                      <div className="text-xs text-muted-foreground">Não atribuídos</div>
+                    </div>
                   </div>
                   <div className="max-h-64 overflow-y-auto border rounded-lg">
                     <table className="w-full text-xs">
@@ -539,6 +576,7 @@ const BulkImport: React.FC = () => {
                           <th className="text-left p-2">Base</th>
                           <th className="text-left p-2">Tipo</th>
                           <th className="text-left p-2">Status</th>
+                          <th className="text-left p-2">Responsável</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -548,6 +586,12 @@ const BulkImport: React.FC = () => {
                             <td className="p-2 max-w-[200px] truncate">{r.base_name}</td>
                             <td className="p-2"><Badge variant="outline" className="text-[10px]">{mapType(r.type_raw)}</Badge></td>
                             <td className="p-2"><Badge variant="secondary" className="text-[10px]">{mapStatus(r.status_raw)}</Badge></td>
+                            <td className="p-2">
+                              {r.assigned && r.assigned.toLowerCase().trim() !== 'não atribuído' && r.assigned.toLowerCase().trim() !== 'nao atribuido'
+                                ? <span className="text-xs">{r.assigned}</span>
+                                : <Badge variant="outline" className="text-[10px] text-muted-foreground">Não atribuído</Badge>
+                              }
+                            </td>
                           </tr>
                         ))}
                       </tbody>
