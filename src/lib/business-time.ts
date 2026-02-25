@@ -6,6 +6,10 @@
  * - Lunch break: 12:00 - 13:12
  * - Useful time per day: 8h48min = 31,680 seconds
  * - Excludes Brazilian national holidays
+ * 
+ * IMPORTANT: All internal calculations use UTC methods on dates
+ * whose UTC slots hold BRT values, ensuring timezone-safe behavior
+ * regardless of the browser's local timezone.
  */
 
 const WORK_START_HOUR = 8;
@@ -25,24 +29,11 @@ const LUNCH_END = LUNCH_END_HOUR * 60 + LUNCH_END_MIN;
 const BRAZIL_OFFSET_MS = -3 * 60 * 60 * 1000;
 
 /**
- * Convert a UTC Date to a pseudo-local Date representing Brazilian time.
- * The returned Date's getHours/getMinutes etc. will return BRT values
- * regardless of the runtime's timezone.
+ * Convert a UTC Date to a Date whose UTC slots hold BRT values.
+ * Use getUTC* methods on the returned date to read BRT time.
  */
 function toBrazilTime(utcDate: Date): Date {
-  // getTime() gives UTC ms. We shift by -3h so that
-  // UTC-based getHours() returns the BRT hour.
-  const utcMs = utcDate.getTime();
-  const brazilMs = utcMs + BRAZIL_OFFSET_MS;
-  // Create a new date using UTC constructor so getUTC* matches BRT
-  const d = new Date(brazilMs);
-  // We need getHours() to return BRT. In browser (BRT timezone) this already works.
-  // But to be safe across environments, we use a workaround:
-  // Return a date whose UTC time equals the BRT time.
-  return new Date(Date.UTC(
-    d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(),
-    d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds()
-  ));
+  return new Date(utcDate.getTime() + BRAZIL_OFFSET_MS);
 }
 
 /**
@@ -63,17 +54,17 @@ function getEasterDate(year: number): Date {
   const m = Math.floor((a + 11 * h + 22 * l) / 451);
   const month = Math.floor((h + l - 7 * m + 114) / 31);
   const day = ((h + l - 7 * m + 114) % 31) + 1;
-  return new Date(year, month - 1, day);
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
 function addDays(date: Date, days: number): Date {
   const result = new Date(date);
-  result.setDate(result.getDate() + days);
+  result.setUTCDate(result.getUTCDate() + days);
   return result;
 }
 
 function dateKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 function getHolidays(year: number): Set<string> {
@@ -92,7 +83,7 @@ function getHolidays(year: number): Set<string> {
   ];
   
   for (const [month, day] of fixed) {
-    holidays.add(dateKey(new Date(year, month, day)));
+    holidays.add(dateKey(new Date(Date.UTC(year, month, day))));
   }
   
   // Mobile holidays based on Easter
@@ -114,7 +105,7 @@ function getHolidays(year: number): Set<string> {
 const holidayCache = new Map<number, Set<string>>();
 
 function isHoliday(date: Date): boolean {
-  const year = date.getFullYear();
+  const year = date.getUTCFullYear();
   if (!holidayCache.has(year)) {
     holidayCache.set(year, getHolidays(year));
   }
@@ -126,6 +117,8 @@ function isHoliday(date: Date): boolean {
  * Converts to Brazilian time (UTC-3) internally.
  * Only counts time within business hours (08:00-18:00 BRT),
  * excluding lunch (12:00-13:12) and holidays.
+ * 
+ * Uses UTC methods throughout to avoid browser timezone interference.
  */
 export function calculateBusinessSeconds(startUtc: Date, endUtc: Date): number {
   const start = toBrazilTime(startUtc);
@@ -139,29 +132,29 @@ export function calculateBusinessSeconds(startUtc: Date, endUtc: Date): number {
   while (current < end) {
     // Skip holidays
     if (isHoliday(current)) {
-      current.setDate(current.getDate() + 1);
-      current.setHours(WORK_START_HOUR, 0, 0, 0);
+      current.setUTCDate(current.getUTCDate() + 1);
+      current.setUTCHours(WORK_START_HOUR, 0, 0, 0);
       continue;
     }
 
-    const currentMinutes = current.getHours() * 60 + current.getMinutes();
+    const currentMinutes = current.getUTCHours() * 60 + current.getUTCMinutes();
     
     // Before work hours
     if (currentMinutes < WORK_START) {
-      current.setHours(WORK_START_HOUR, 0, 0, 0);
+      current.setUTCHours(WORK_START_HOUR, 0, 0, 0);
       continue;
     }
 
     // After work hours
     if (currentMinutes >= WORK_END) {
-      current.setDate(current.getDate() + 1);
-      current.setHours(WORK_START_HOUR, 0, 0, 0);
+      current.setUTCDate(current.getUTCDate() + 1);
+      current.setUTCHours(WORK_START_HOUR, 0, 0, 0);
       continue;
     }
 
     // During lunch
     if (currentMinutes >= LUNCH_START && currentMinutes < LUNCH_END) {
-      current.setHours(LUNCH_END_HOUR, LUNCH_END_MIN, 0, 0);
+      current.setUTCHours(LUNCH_END_HOUR, LUNCH_END_MIN, 0, 0);
       continue;
     }
 
@@ -174,7 +167,7 @@ export function calculateBusinessSeconds(startUtc: Date, endUtc: Date): number {
     }
 
     const nextBoundary = new Date(current);
-    nextBoundary.setHours(Math.floor(nextBoundaryMinutes / 60), nextBoundaryMinutes % 60, 0, 0);
+    nextBoundary.setUTCHours(Math.floor(nextBoundaryMinutes / 60), nextBoundaryMinutes % 60, 0, 0);
 
     const periodEnd = end < nextBoundary ? end : nextBoundary;
     const diffMs = periodEnd.getTime() - current.getTime();
@@ -182,7 +175,7 @@ export function calculateBusinessSeconds(startUtc: Date, endUtc: Date): number {
 
     if (end <= nextBoundary) break;
 
-    current.setHours(Math.floor(nextBoundaryMinutes / 60), nextBoundaryMinutes % 60, 0, 0);
+    current.setUTCHours(Math.floor(nextBoundaryMinutes / 60), nextBoundaryMinutes % 60, 0, 0);
   }
 
   return totalSeconds;
