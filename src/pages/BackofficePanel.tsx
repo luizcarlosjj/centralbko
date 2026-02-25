@@ -11,8 +11,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
-import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TicketStatus, PauseLog } from '@/types/tickets';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal } from 'lucide-react';
+import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TicketStatus, PauseLog, Profile } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
@@ -37,6 +38,8 @@ const AnalystPanel = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [pauseDialogTicket, setPauseDialogTicket] = useState<Ticket | null>(null);
+  const [assignDialogTicket, setAssignDialogTicket] = useState<Ticket | null>(null);
+  const [selectedBackoffice, setSelectedBackoffice] = useState('');
 
   // Filters
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -48,6 +51,7 @@ const AnalystPanel = () => {
   // Pagination
   const [openPage, setOpenPage] = useState(0);
   const [finishedPage, setFinishedPage] = useState(0);
+  const [unassignedPage, setUnassignedPage] = useState(0);
 
   // Expanded rows for tickets (open + finished)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -103,15 +107,49 @@ const AnalystPanel = () => {
     staleTime: 60_000,
   });
 
+  // Unassigned tickets query
+  const { data: unassignedData, isLoading: unassignedLoading } = useQuery({
+    queryKey: ['backoffice-unassigned-tickets', unassignedPage],
+    queryFn: async () => {
+      const from = unassignedPage * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data, count } = await supabase
+        .from('tickets')
+        .select(TICKET_COLUMNS, { count: 'exact' })
+        .is('assigned_analyst_id', null)
+        .eq('status', 'nao_iniciado')
+        .order('created_at', { ascending: false })
+        .range(from, to);
+      return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
+    },
+    staleTime: 30_000,
+  });
+
+  // Backoffice users for assignment
+  const { data: backofficeUsers = [] } = useQuery({
+    queryKey: ['backoffice-users-list'],
+    queryFn: async () => {
+      const { data: roles } = await supabase.from('user_roles').select('user_id').eq('role', 'backoffice');
+      if (!roles || roles.length === 0) return [];
+      const userIds = roles.map(r => r.user_id);
+      const { data: profs } = await supabase.from('profiles').select('id, name').in('id', userIds);
+      return (profs || []) as Profile[];
+    },
+    staleTime: 120_000,
+  });
+
   const openTickets = openData?.tickets || [];
   const openTotal = openData?.count || 0;
   const finishedTickets = finishedData?.tickets || [];
   const finishedTotal = finishedData?.count || 0;
+  const unassignedTickets = unassignedData?.tickets || [];
+  const unassignedTotal = unassignedData?.count || 0;
   const loading = openLoading || finishedLoading;
 
   const invalidateTickets = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['analyst-open-tickets'] });
     queryClient.invalidateQueries({ queryKey: ['analyst-finished-tickets'] });
+    queryClient.invalidateQueries({ queryKey: ['backoffice-unassigned-tickets'] });
   }, [queryClient]);
 
   // Realtime subscription for live updates
@@ -183,6 +221,34 @@ const AnalystPanel = () => {
     invalidateTickets();
   };
 
+  const assumeTicket = async (ticket: Ticket) => {
+    if (!user) return;
+    const now = new Date().toISOString();
+    await supabase.from('tickets').update({
+      assigned_analyst_id: user.id,
+      status: 'em_andamento',
+      started_at: now,
+    } as any).eq('id', ticket.id);
+    await supabase.from('ticket_status_logs').insert({ ticket_id: ticket.id, changed_by: user.id, old_status: 'nao_iniciado', new_status: 'em_andamento' });
+    toast({ title: 'Chamado assumido com sucesso' });
+    invalidateTickets();
+  };
+
+  const assignTicket = async () => {
+    if (!user || !assignDialogTicket || !selectedBackoffice) return;
+    const now = new Date().toISOString();
+    await supabase.from('tickets').update({
+      assigned_analyst_id: selectedBackoffice,
+      status: 'em_andamento',
+      started_at: now,
+    } as any).eq('id', assignDialogTicket.id);
+    await supabase.from('ticket_status_logs').insert({ ticket_id: assignDialogTicket.id, changed_by: user.id, old_status: 'nao_iniciado', new_status: 'em_andamento' });
+    toast({ title: 'Chamado atribuído com sucesso' });
+    setAssignDialogTicket(null);
+    setSelectedBackoffice('');
+    invalidateTickets();
+  };
+
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -202,6 +268,7 @@ const AnalystPanel = () => {
   const openStatusOptions: Record<string, string> = { em_andamento: 'Em Andamento', pausado: 'Pausado' };
   const openTotalPages = Math.ceil(openTotal / PAGE_SIZE);
   const finishedTotalPages = Math.ceil(finishedTotal / PAGE_SIZE);
+  const unassignedTotalPages = Math.ceil(unassignedTotal / PAGE_SIZE);
 
   const PaginationControls = ({ page, totalPages, setPage }: { page: number; totalPages: number; setPage: (p: number) => void }) => {
     if (totalPages <= 1) return null;
@@ -223,11 +290,59 @@ const AnalystPanel = () => {
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-foreground">Painel do Analista</h1>
 
-        <Tabs defaultValue="open" className="w-full">
+        <Tabs defaultValue="unassigned" className="w-full">
           <TabsList>
+            <TabsTrigger value="unassigned">Não Atribuídos ({unassignedTotal})</TabsTrigger>
             <TabsTrigger value="open">Em Aberto ({openTotal})</TabsTrigger>
             <TabsTrigger value="finished">Finalizados ({finishedTotal})</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="unassigned">
+            <Card>
+              <CardContent className="pt-6">
+                {unassignedTickets.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-8 text-center">Nenhum chamado não atribuído</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>ID</TableHead>
+                        <TableHead>Base</TableHead>
+                        <TableHead>Solicitante</TableHead>
+                        <TableHead>Prioridade</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Data</TableHead>
+                        <TableHead>Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {unassignedTickets.map(ticket => (
+                        <TableRow key={ticket.id}>
+                          <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
+                          <TableCell>{ticket.base_name}</TableCell>
+                          <TableCell>{ticket.requester_name}</TableCell>
+                          <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                          <TableCell>{getTypeLabel(ticket.type)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button size="sm" onClick={() => assumeTicket(ticket)}>
+                                <HandMetal className="mr-1 h-3 w-3" /> Assumir
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => { setAssignDialogTicket(ticket); setSelectedBackoffice(''); }}>
+                                <UserPlus className="mr-1 h-3 w-3" /> Atribuir
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+                <PaginationControls page={unassignedPage} totalPages={unassignedTotalPages} setPage={setUnassignedPage} />
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           <TabsContent value="open">
             <Card className="mb-4">
@@ -474,6 +589,34 @@ const AnalystPanel = () => {
           onPaused={invalidateTickets}
         />
       )}
+
+      <Dialog open={!!assignDialogTicket} onOpenChange={(open) => { if (!open) setAssignDialogTicket(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Atribuir Chamado</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Chamado: <span className="font-mono font-medium">{assignDialogTicket?.id.slice(0, 8).toUpperCase()}</span> — {assignDialogTicket?.base_name}
+            </p>
+            <div>
+              <Label>Selecione o Backoffice</Label>
+              <Select value={selectedBackoffice} onValueChange={setSelectedBackoffice}>
+                <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                <SelectContent>
+                  {backofficeUsers.map(u => (
+                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignDialogTicket(null)}>Cancelar</Button>
+            <Button onClick={assignTicket} disabled={!selectedBackoffice}>Confirmar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 };

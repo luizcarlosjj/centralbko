@@ -86,10 +86,13 @@ const MetricsDashboard = () => {
   const meta48hRate = total > 0 ? (((finishedWithin48h + paused) / total) * 100).toFixed(1) : '0.0';
 
   const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    if (d > 0) return `${d}d ${h}h ${m}min`;
+    if (h > 0) return `${h}h ${m}min`;
+    if (m > 0) return `${m}min`;
+    return '< 1min';
   };
 
   const getProfileName = (id: string) => profiles.find(p => p.id === id)?.name || id.slice(0, 8);
