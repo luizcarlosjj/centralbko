@@ -261,11 +261,14 @@ const AnalystPanel = () => {
 
   const assumeTicket = async (ticket: Ticket) => {
     if (!user) return;
-    const now = new Date().toISOString();
+    const now = new Date();
+    const elapsedSinceCreation = calculateBusinessSeconds(new Date(ticket.created_at), now);
+    const accumulatedExec = (ticket.total_execution_seconds || 0) + Math.max(0, elapsedSinceCreation);
     await supabase.from('tickets').update({
       assigned_analyst_id: user.id,
       status: 'em_andamento',
-      started_at: now,
+      started_at: now.toISOString(),
+      total_execution_seconds: accumulatedExec,
     } as any).eq('id', ticket.id);
     await supabase.from('ticket_status_logs').insert({ ticket_id: ticket.id, changed_by: user.id, old_status: 'nao_iniciado', new_status: 'em_andamento' });
     toast({ title: 'Chamado assumido com sucesso' });
@@ -274,11 +277,14 @@ const AnalystPanel = () => {
 
   const assignTicket = async () => {
     if (!user || !assignDialogTicket || !selectedBackoffice) return;
-    const now = new Date().toISOString();
+    const now = new Date();
+    const elapsedSinceCreation = calculateBusinessSeconds(new Date(assignDialogTicket.created_at), now);
+    const accumulatedExec = (assignDialogTicket.total_execution_seconds || 0) + Math.max(0, elapsedSinceCreation);
     await supabase.from('tickets').update({
       assigned_analyst_id: selectedBackoffice,
       status: 'em_andamento',
-      started_at: now,
+      started_at: now.toISOString(),
+      total_execution_seconds: accumulatedExec,
     } as any).eq('id', assignDialogTicket.id);
     await supabase.from('ticket_status_logs').insert({ ticket_id: assignDialogTicket.id, changed_by: user.id, old_status: 'nao_iniciado', new_status: 'em_andamento' });
     toast({ title: 'Chamado atribuído com sucesso' });
@@ -446,6 +452,7 @@ const AnalystPanel = () => {
                         <SortableHead col="requester_name">Solicitante</SortableHead>
                         <SortableHead col="priority">Prioridade</SortableHead>
                         <TableHead>Tipo</TableHead>
+                        <TableHead>Tempo</TableHead>
                         <SortableHead col="created_at">Data</SortableHead>
                         <TableHead>Ações</TableHead>
                       </TableRow>
@@ -458,6 +465,7 @@ const AnalystPanel = () => {
                           <TableCell>{ticket.requester_name}</TableCell>
                           <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
                           <TableCell>{getTypeLabel(ticket.type)}</TableCell>
+                          <TableCell><LiveTimer ticket={ticket} /></TableCell>
                           <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
                           <TableCell>
                             <div className="flex gap-1">
