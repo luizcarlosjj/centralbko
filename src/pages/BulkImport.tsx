@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Upload, CheckCircle, AlertCircle, Trash2, FileSpreadsheet, X, Download } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Trash2, FileSpreadsheet, X, Download, Database, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -268,6 +268,8 @@ const BulkImport: React.FC = () => {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportingSQL, setExportingSQL] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<{ successCount: number; errorCount: number; errors: string[] } | null>(null);
   const [backofficeUsers, setBackofficeUsers] = useState<BackofficeUser[]>([]);
@@ -427,27 +429,192 @@ const BulkImport: React.FC = () => {
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([
-      ['Solicitante', 'Base', 'Data Criação', 'Data Conclusão', 'Tempo Execução', 'Status', 'Tipo', 'Responsável', 'Nível do Setup', 'Time'],
-      ['João', '123456 - Empresa Exemplo', '01/03/2026', '02/03/2026', '02:30', 'Concluido', 'Cliente', 'André', 'Básico', 'Suporte'],
-      ['Maria', '789012 - Outra Empresa', '03/03/2026', '', '', 'Não iniciado', 'Equipamento', 'Não atribuído', 'Avançado', 'Implantação'],
+      ['Solicitante', 'Base', 'Data Criação', 'Data Conclusão', 'Hora Abertura', 'Hora Encerramento', 'Tempo Execução', 'Status', 'Tipo', 'Responsável', 'Nível do Setup', 'Time', 'Prioridade', 'Descrição'],
+      ['João', '123456 - Empresa Exemplo', '01/03/2026', '02/03/2026', '08:59:52', '16:30:00', '02:30', 'Concluido', 'Cliente', 'André', 'Básico', 'Suporte', 'Normal', 'Descrição do chamado'],
+      ['Maria', '789012 - Outra Empresa', '03/03/2026', '', '09:00:00', '', '', 'Não iniciado', 'Equipamento', 'Não atribuído', 'Avançado', 'Implantação', 'Alta', 'Outra descrição'],
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Importação');
     XLSX.writeFile(wb, 'modelo_importacao.xlsx');
   };
 
+  // Helper: fetch all records from a table with pagination
+  const fetchAllPaginated = async (table: string, select = '*') => {
+    const allData: any[] = [];
+    let offset = 0;
+    const pageSize = 1000;
+    while (true) {
+      const { data, error } = await supabase.from(table as any).select(select).range(offset, offset + pageSize - 1);
+      if (error) throw new Error(`Erro ao buscar ${table}: ${error.message}`);
+      if (data) allData.push(...data);
+      if (!data || data.length < pageSize) break;
+      offset += pageSize;
+    }
+    return allData;
+  };
+
+  const handleExportExcel = async () => {
+    setExportingExcel(true);
+    try {
+      // Fetch all tickets
+      const tickets = await fetchAllPaginated('tickets');
+      // Fetch profiles for analyst name mapping
+      const { data: profiles } = await supabase.from('profiles').select('id, name');
+      const profileMap: Record<string, string> = {};
+      (profiles || []).forEach(p => { profileMap[p.id] = p.name; });
+
+      const formatTime = (dateStr: string | null): string => {
+        if (!dateStr) return '';
+        try {
+          const d = new Date(dateStr);
+          return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        } catch { return ''; }
+      };
+
+      const formatDate = (dateStr: string | null): string => {
+        if (!dateStr) return '';
+        try {
+          const d = new Date(dateStr);
+          return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ${formatTime(dateStr)}`;
+        } catch { return ''; }
+      };
+
+      const formatExecTime = (seconds: number): string => {
+        if (!seconds || seconds <= 0) return '';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      };
+
+      const rows = tickets.map(t => [
+        t.requester_name || '',
+        t.base_name || '',
+        formatDate(t.created_at),
+        formatDate(t.finished_at),
+        formatTime(t.created_at),
+        formatTime(t.finished_at),
+        formatExecTime(t.total_execution_seconds),
+        t.status || '',
+        t.type || '',
+        t.assigned_analyst_id ? (profileMap[t.assigned_analyst_id] || 'Desconhecido') : 'Não atribuído',
+        t.setup_level || '',
+        t.team || '',
+        t.priority || '',
+        t.description || '',
+      ]);
+
+      const header = ['Solicitante', 'Base', 'Data Criação', 'Data Conclusão', 'Hora Abertura', 'Hora Encerramento', 'Tempo Execução', 'Status', 'Tipo', 'Responsável', 'Nível do Setup', 'Time', 'Prioridade', 'Descrição'];
+      const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+
+      // Auto-size columns
+      ws['!cols'] = header.map((_, i) => ({ wch: Math.max(header[i].length, 15) }));
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Chamados');
+
+      const today = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `chamados_export_${today}.xlsx`);
+
+      toast({ title: 'Exportação concluída', description: `${tickets.length} chamados exportados com sucesso.` });
+    } catch (err) {
+      toast({ title: 'Erro na exportação', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
+  const handleExportSQL = async () => {
+    setExportingSQL(true);
+    try {
+      const escapeSQL = (val: any): string => {
+        if (val === null || val === undefined) return 'NULL';
+        if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+        if (typeof val === 'number') return String(val);
+        return `'${String(val).replace(/'/g, "''")}'`;
+      };
+
+      const generateInserts = (tableName: string, rows: any[]): string => {
+        if (rows.length === 0) return `-- ${tableName}: 0 registros\n\n`;
+        const cols = Object.keys(rows[0]);
+        let sql = `-- ========================================\n`;
+        sql += `-- Tabela: ${tableName} (${rows.length} registros)\n`;
+        sql += `-- ========================================\n\n`;
+        for (const row of rows) {
+          const values = cols.map(c => escapeSQL(row[c])).join(', ');
+          sql += `INSERT INTO ${tableName} (${cols.join(', ')}) VALUES (${values});\n`;
+        }
+        sql += '\n';
+        return sql;
+      };
+
+      const tables = [
+        'profiles',
+        'user_roles',
+        'pause_reasons',
+        'setup_levels',
+        'teams',
+        'ticket_types',
+        'requesters',
+        'assignment_control',
+        'pause_logs',
+        'pause_evidences',
+        'pause_responses',
+        'pause_response_files',
+        'ticket_status_logs',
+      ];
+
+      let fullSQL = `-- ========================================\n`;
+      fullSQL += `-- BACKUP COMPLETO DO SISTEMA\n`;
+      fullSQL += `-- Gerado em: ${new Date().toISOString()}\n`;
+      fullSQL += `-- ========================================\n\n`;
+
+      for (const table of tables) {
+        const data = await fetchAllPaginated(table);
+        fullSQL += generateInserts(table, data);
+      }
+
+      const blob = new Blob([fullSQL], { type: 'application/sql' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const today = new Date().toISOString().slice(0, 10);
+      a.download = `backup_sistema_${today}.sql`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast({ title: 'Backup gerado', description: `${tables.length} tabelas exportadas com sucesso.` });
+    } catch (err) {
+      toast({ title: 'Erro no backup', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setExportingSQL(false);
+    }
+  };
+
   return (
     <AppLayout>
       <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold">Importação em Massa</h1>
-            <p className="text-muted-foreground">Envie uma planilha para importar tickets no sistema</p>
+            <p className="text-muted-foreground">Envie uma planilha para importar tickets ou exporte dados para backup</p>
           </div>
-          <Button variant="outline" size="sm" onClick={downloadTemplate}>
-            <Download className="h-4 w-4 mr-2" />
-            Modelo
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={downloadTemplate}>
+              <Download className="h-4 w-4 mr-2" />
+              Modelo
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExportExcel} disabled={exportingExcel} className="border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400">
+              {exportingExcel ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileSpreadsheet className="h-4 w-4 mr-2" />}
+              Exportar Chamados
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExportSQL} disabled={exportingSQL}>
+              {exportingSQL ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Database className="h-4 w-4 mr-2" />}
+              Exportar SQL
+            </Button>
+          </div>
         </div>
 
         {/* File Upload */}
