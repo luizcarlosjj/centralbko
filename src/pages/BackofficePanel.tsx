@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal } from 'lucide-react';
+import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal, Search } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TicketStatus, PauseLog, Profile } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
@@ -47,6 +47,7 @@ const AnalystPanel = () => {
   const [filterType, setFilterType] = useState<string>('all');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [finishedSearch, setFinishedSearch] = useState('');
 
   // Pagination
   const [openPage, setOpenPage] = useState(0);
@@ -502,10 +503,31 @@ const AnalystPanel = () => {
 
           <TabsContent value="finished">
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="pt-6 space-y-4">
+                <div className="relative max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por ID, base ou solicitante..."
+                    value={finishedSearch}
+                    onChange={e => setFinishedSearch(e.target.value)}
+                    className="pl-9 h-9"
+                  />
+                </div>
                 {finishedTickets.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">Nenhum chamado finalizado</p>
-                ) : (
+                ) : (() => {
+                  const searchLower = finishedSearch.toLowerCase().trim();
+                  const filtered = searchLower
+                    ? finishedTickets.filter(t =>
+                        t.id.toLowerCase().includes(searchLower) ||
+                        t.base_name.toLowerCase().includes(searchLower) ||
+                        t.requester_name.toLowerCase().includes(searchLower)
+                      )
+                    : finishedTickets;
+                  if (filtered.length === 0) return (
+                    <p className="text-sm text-muted-foreground py-8 text-center">Nenhum resultado para "{finishedSearch}"</p>
+                  );
+                  return (
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -521,7 +543,7 @@ const AnalystPanel = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {finishedTickets.map(ticket => (
+                      {filtered.map(ticket => (
                         <React.Fragment key={ticket.id}>
                           <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
                             <TableCell>
@@ -573,7 +595,8 @@ const AnalystPanel = () => {
                       ))}
                     </TableBody>
                   </Table>
-                )}
+                  );
+                })()}
                 <PaginationControls page={finishedPage} totalPages={finishedTotalPages} setPage={setFinishedPage} />
               </CardContent>
             </Card>
