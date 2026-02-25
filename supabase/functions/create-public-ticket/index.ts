@@ -18,9 +18,9 @@ Deno.serve(async (req) => {
     );
 
     const body = await req.json();
-    const { base_name, requester_name, priority, type, description, attachments } = body;
+    const { base_name, requester_name, priority, type, setup_level, team, description, attachments } = body;
 
-    if (!base_name || !requester_name || !priority || !type || !description) {
+    if (!base_name || !requester_name || !priority || !type || !setup_level || !team || !description) {
       return new Response(
         JSON.stringify({ error: "Todos os campos obrigatórios devem ser preenchidos." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -145,6 +145,8 @@ Deno.serve(async (req) => {
         requester_user_id: null,
         priority,
         type,
+        setup_level: setup_level || null,
+        team: team || null,
         description,
         attachment_url,
         status: "nao_iniciado",

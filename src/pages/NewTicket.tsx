@@ -25,6 +25,8 @@ const NewTicket = () => {
   const [baseName, setBaseName] = useState('');
   const [priority, setPriority] = useState<TicketPriority | ''>('');
   const [type, setType] = useState('');
+  const [setupLevel, setSetupLevel] = useState('');
+  const [team, setTeam] = useState('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -35,6 +37,24 @@ const NewTicket = () => {
     queryKey: ['new-ticket-types'],
     queryFn: async () => {
       const { data } = await supabase.from('ticket_types').select('value, label').eq('active', true).order('label');
+      return (data || []) as { value: string; label: string }[];
+    },
+    staleTime: 120_000,
+  });
+
+  const { data: setupLevels = [] } = useQuery({
+    queryKey: ['new-ticket-setup-levels'],
+    queryFn: async () => {
+      const { data } = await supabase.from('setup_levels').select('value, label').eq('active', true).order('label');
+      return (data || []) as { value: string; label: string }[];
+    },
+    staleTime: 120_000,
+  });
+
+  const { data: teams = [] } = useQuery({
+    queryKey: ['new-ticket-teams'],
+    queryFn: async () => {
+      const { data } = await supabase.from('teams').select('value, label').eq('active', true).order('label');
       return (data || []) as { value: string; label: string }[];
     },
     staleTime: 120_000,
@@ -75,7 +95,7 @@ const NewTicket = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!priority || !type || !user || !profile || attachments.length === 0) return;
+    if (!priority || !type || !setupLevel || !team || !user || !profile || attachments.length === 0) return;
     setSubmitting(true);
 
     const id = crypto.randomUUID();
@@ -105,6 +125,8 @@ const NewTicket = () => {
       requester_user_id: user.id,
       priority,
       type,
+      setup_level: setupLevel,
+      team,
       description,
       attachment_url: attachmentUrl,
     } as any);
@@ -156,6 +178,26 @@ const NewTicket = () => {
                   </Select>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Nível do Setup <span className="text-destructive">*</span></Label>
+                  <Select value={setupLevel} onValueChange={setSetupLevel}>
+                    <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                    <SelectContent>
+                      {setupLevels.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Time <span className="text-destructive">*</span></Label>
+                  <Select value={team} onValueChange={setTeam}>
+                    <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                    <SelectContent>
+                      {teams.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="description">Descrição</Label>
                 <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Descreva o chamado..." rows={4} maxLength={5000} />
@@ -197,7 +239,7 @@ const NewTicket = () => {
                 {fileError && <p className="text-sm text-destructive">{fileError}</p>}
                 <p className="text-xs text-muted-foreground">{attachments.length}/{MAX_FILES} arquivos</p>
               </div>
-              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || attachments.length === 0}>
+              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || !setupLevel || !team || attachments.length === 0}>
                 <Send className="mr-2 h-4 w-4" />
                 {submitting ? 'Enviando...' : 'Enviar Chamado'}
               </Button>

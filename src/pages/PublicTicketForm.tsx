@@ -24,6 +24,8 @@ const PublicTicketForm = () => {
   const [requesterName, setRequesterName] = useState('');
   const [priority, setPriority] = useState<TicketPriority | ''>('');
   const [type, setType] = useState('');
+  const [setupLevel, setSetupLevel] = useState('');
+  const [team, setTeam] = useState('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -42,6 +44,22 @@ const PublicTicketForm = () => {
     queryKey: ['public-ticket-types'],
     queryFn: async () => {
       const { data } = await supabase.from('ticket_types').select('id, value, label').eq('active', true).order('label');
+      return (data || []) as { id: string; value: string; label: string }[];
+    },
+  });
+
+  const { data: setupLevels = [] } = useQuery({
+    queryKey: ['public-setup-levels'],
+    queryFn: async () => {
+      const { data } = await supabase.from('setup_levels').select('id, value, label').eq('active', true).order('label');
+      return (data || []) as { id: string; value: string; label: string }[];
+    },
+  });
+
+  const { data: teams = [] } = useQuery({
+    queryKey: ['public-teams'],
+    queryFn: async () => {
+      const { data } = await supabase.from('teams').select('id, value, label').eq('active', true).order('label');
       return (data || []) as { id: string; value: string; label: string }[];
     },
   });
@@ -112,7 +130,7 @@ const PublicTicketForm = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!priority || !type || !requesterName || attachments.length === 0) return;
+    if (!priority || !type || !requesterName || !setupLevel || !team || attachments.length === 0) return;
     setSubmitting(true);
 
     try {
@@ -129,6 +147,8 @@ const PublicTicketForm = () => {
         requester_name: requesterName,
         priority,
         type,
+        setup_level: setupLevel,
+        team,
         description,
         attachments: filesData,
       };
@@ -202,6 +222,32 @@ const PublicTicketForm = () => {
                   )}
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Nível do Setup <span className="text-destructive">*</span></Label>
+                  <Select value={setupLevel} onValueChange={setSetupLevel}>
+                    <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                    <SelectContent>
+                      {setupLevels.map(s => <SelectItem key={s.id} value={s.value}>{s.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {setupLevels.length === 0 && (
+                    <p className="text-xs text-muted-foreground">Nenhum nível cadastrado. Peça ao supervisor para cadastrar.</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label>Time <span className="text-destructive">*</span></Label>
+                  <Select value={team} onValueChange={setTeam}>
+                    <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                    <SelectContent>
+                      {teams.map(t => <SelectItem key={t.id} value={t.value}>{t.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {teams.length === 0 && (
+                    <p className="text-xs text-muted-foreground">Nenhum time cadastrado. Peça ao supervisor para cadastrar.</p>
+                  )}
+                </div>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="description">Descrição <span className="text-destructive">*</span></Label>
                 <Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} required placeholder="Descreva o chamado..." rows={4} maxLength={5000} />
@@ -245,7 +291,7 @@ const PublicTicketForm = () => {
                 {fileError && <p className="text-sm text-destructive">{fileError}</p>}
                 <p className="text-xs text-muted-foreground">{attachments.length}/{MAX_FILES} arquivos</p>
               </div>
-              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || !requesterName || attachments.length === 0}>
+              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || !requesterName || !setupLevel || !team || attachments.length === 0}>
                 <Send className="mr-2 h-4 w-4" />
                 {submitting ? 'Enviando...' : 'Enviar Chamado'}
               </Button>
