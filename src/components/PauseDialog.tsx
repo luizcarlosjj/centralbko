@@ -88,7 +88,10 @@ const PauseDialog: React.FC<PauseDialogProps> = ({ open, onOpenChange, ticket, o
       const pauseLogId = (pauseLog as any).id;
 
       for (const file of files) {
-        const filePath = `tickets/${ticket.id}/pauses/${pauseLogId}/${Date.now()}_${file.name}`;
+        const sanitizedName = file.name
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-zA-Z0-9._-]/g, '_');
+        const filePath = `tickets/${ticket.id}/pauses/${pauseLogId}/${Date.now()}_${sanitizedName}`;
         const { error: uploadError } = await supabase.storage.from('pause-evidences').upload(filePath, file);
         if (uploadError) throw uploadError;
 
