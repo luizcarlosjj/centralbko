@@ -153,11 +153,32 @@ const PublicTicketForm = () => {
         attachments: filesData,
       };
 
-      const { data, error } = await supabase.functions.invoke('create-public-ticket', { body });
+      const res = await supabase.functions.invoke('create-public-ticket', { body });
 
-      if (error || data?.error) {
-        toast({ title: 'Erro', description: data?.error || error?.message || 'Erro ao criar chamado', variant: 'destructive' });
+      // When the edge function returns non-2xx, the SDK puts the response in error
+      // We need to extract the actual JSON error message from it
+      let errorMessage: string | null = null;
+      if (res.error) {
+        try {
+          // FunctionsHttpError contains the response context
+          const ctx = (res.error as any)?.context;
+          if (ctx && typeof ctx.json === 'function') {
+            const errBody = await ctx.json();
+            errorMessage = errBody?.error || res.error.message;
+          } else {
+            errorMessage = res.error.message;
+          }
+        } catch {
+          errorMessage = res.error.message || 'Erro ao criar chamado';
+        }
+      } else if (res.data?.error) {
+        errorMessage = res.data.error;
+      }
+
+      if (errorMessage) {
+        toast({ title: 'Erro', description: errorMessage, variant: 'destructive' });
       } else {
+        const data = res.data;
         toast({ title: 'Chamado criado!', description: `ID: ${(data.ticket_id || '').slice(0, 8).toUpperCase()}` });
         navigate('/login');
       }
