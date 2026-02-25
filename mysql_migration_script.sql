@@ -1,7 +1,7 @@
 -- ============================================================
 -- MIGRAÇÃO COMPLETA: PostgreSQL (Supabase) → MySQL 8.0+ (AWS RDS)
 -- Projeto: Painel de Gestão de Chamados
--- Gerado em: 2026-02-23
+-- Atualizado em: 2026-02-25
 -- Compatível com: MySQL 8.0+ / Amazon RDS MySQL / Aurora MySQL
 -- 
 -- INSTRUÇÕES:
@@ -9,8 +9,10 @@
 -- 2. Todas as nomenclaturas são idênticas ao banco PostgreSQL original
 -- 3. UUIDs são armazenados como CHAR(36) para legibilidade
 -- 4. Timestamps usam DATETIME(6) para microsegundos (equivale a timestamptz)
--- 5. RLS foi convertido em stored procedures de validação
+-- 5. RLS foi convertido em stored procedures/functions de validação
 -- 6. Storage policies foram documentadas para implementação com S3
+-- 7. Tabelas setup_levels e teams incluídas (adicionadas ao sistema)
+-- 8. Campos setup_level e team na tabela tickets incluídos
 -- ============================================================
 
 SET NAMES utf8mb4;
@@ -98,12 +100,50 @@ CREATE TABLE ticket_types (
 COMMENT='Tipos de solicitação configuráveis';
 
 -- ------------------------------------------------------------
--- 2.5 tickets
+-- 2.5 setup_levels
+-- Níveis de setup configuráveis pelo supervisor
+-- Colunas: id, label, value (UNIQUE), description, active, created_by, created_at
+-- ------------------------------------------------------------
+CREATE TABLE setup_levels (
+  id CHAR(36) NOT NULL DEFAULT (UUID()),
+  label TEXT NOT NULL,
+  value VARCHAR(255) NOT NULL,
+  description TEXT DEFAULT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_by CHAR(36) NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (id),
+  UNIQUE KEY setup_levels_value_key (value),
+  CONSTRAINT fk_setup_levels_created_by FOREIGN KEY (created_by) REFERENCES profiles(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Níveis de setup configuráveis pelo supervisor';
+
+-- ------------------------------------------------------------
+-- 2.6 teams
+-- Equipes/times configuráveis pelo supervisor
+-- Colunas: id, label, value (UNIQUE), description, active, created_by, created_at
+-- ------------------------------------------------------------
+CREATE TABLE teams (
+  id CHAR(36) NOT NULL DEFAULT (UUID()),
+  label TEXT NOT NULL,
+  value VARCHAR(255) NOT NULL,
+  description TEXT DEFAULT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_by CHAR(36) NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (id),
+  UNIQUE KEY teams_value_key (value),
+  CONSTRAINT fk_teams_created_by FOREIGN KEY (created_by) REFERENCES profiles(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Equipes/times configuráveis pelo supervisor';
+
+-- ------------------------------------------------------------
+-- 2.7 tickets
 -- Chamados com controle de tempo
 -- Colunas: id, base_name, requester_name, requester_user_id, priority,
 --          type, description, status, created_at, started_at, finished_at,
 --          total_execution_seconds, total_paused_seconds, assigned_analyst_id,
---          pause_started_at, attachment_url
+--          pause_started_at, attachment_url, setup_level, team
 -- Índices: status, assigned_analyst_id, (assigned_analyst_id+status), created_at DESC
 -- ------------------------------------------------------------
 CREATE TABLE tickets (
@@ -123,18 +163,22 @@ CREATE TABLE tickets (
   assigned_analyst_id CHAR(36) DEFAULT NULL,
   pause_started_at DATETIME(6) DEFAULT NULL,
   attachment_url TEXT DEFAULT NULL,
+  setup_level VARCHAR(255) DEFAULT NULL COMMENT 'Referência ao value de setup_levels (pode ser NULL)',
+  team VARCHAR(255) DEFAULT NULL COMMENT 'Referência ao value de teams (pode ser NULL)',
   PRIMARY KEY (id),
   INDEX idx_tickets_status (status),
   INDEX idx_tickets_assigned_analyst_id (assigned_analyst_id),
   INDEX idx_tickets_analyst_status (assigned_analyst_id, status),
   INDEX idx_tickets_created_at_desc (created_at DESC),
+  INDEX idx_tickets_setup_level (setup_level),
+  INDEX idx_tickets_team (team),
   CONSTRAINT fk_tickets_requester_user_id FOREIGN KEY (requester_user_id) REFERENCES profiles(id) ON DELETE SET NULL,
   CONSTRAINT fk_tickets_assigned_analyst_id FOREIGN KEY (assigned_analyst_id) REFERENCES profiles(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Chamados/tickets do sistema';
+COMMENT='Chamados/tickets do sistema com controle de tempo';
 
 -- ------------------------------------------------------------
--- 2.6 ticket_status_logs
+-- 2.8 ticket_status_logs
 -- Histórico de mudanças de status
 -- Colunas: id, ticket_id, changed_by, old_status, new_status, changed_at
 -- ------------------------------------------------------------
@@ -147,12 +191,13 @@ CREATE TABLE ticket_status_logs (
   changed_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (id),
   INDEX idx_ticket_status_logs_ticket_id (ticket_id),
+  INDEX idx_ticket_status_logs_changed_at (changed_at),
   CONSTRAINT fk_ticket_status_logs_ticket_id FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Log de mudanças de status dos chamados';
 
 -- ------------------------------------------------------------
--- 2.7 pause_reasons
+-- 2.9 pause_reasons
 -- Motivos de pausa
 -- Colunas: id, title, description, active, created_by, created_at
 -- ------------------------------------------------------------
@@ -169,7 +214,7 @@ CREATE TABLE pause_reasons (
 COMMENT='Motivos de pausa configuráveis pelo supervisor';
 
 -- ------------------------------------------------------------
--- 2.8 pause_logs
+-- 2.10 pause_logs
 -- Registros de pausas
 -- Colunas: id, ticket_id, pause_reason_id, description_text,
 --          pause_started_at, pause_ended_at, paused_seconds, created_by
@@ -187,13 +232,14 @@ CREATE TABLE pause_logs (
   PRIMARY KEY (id),
   INDEX idx_pause_logs_ticket_id (ticket_id),
   INDEX idx_pause_logs_ticket_pause_ended (ticket_id, pause_ended_at),
+  INDEX idx_pause_logs_created_by (created_by),
   CONSTRAINT fk_pause_logs_ticket_id FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
   CONSTRAINT fk_pause_logs_pause_reason_id FOREIGN KEY (pause_reason_id) REFERENCES pause_reasons(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Registros de pausas dos chamados';
 
 -- ------------------------------------------------------------
--- 2.9 pause_evidences
+-- 2.11 pause_evidences
 -- Evidências de pausa (arquivos)
 -- Colunas: id, ticket_id, pause_log_id, file_url, uploaded_by, created_at
 -- Índice: pause_log_id
@@ -207,13 +253,14 @@ CREATE TABLE pause_evidences (
   created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (id),
   INDEX idx_pause_evidences_pause_log_id (pause_log_id),
+  INDEX idx_pause_evidences_ticket_id (ticket_id),
   CONSTRAINT fk_pause_evidences_ticket_id FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
   CONSTRAINT fk_pause_evidences_pause_log_id FOREIGN KEY (pause_log_id) REFERENCES pause_logs(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Arquivos de evidência anexados a pausas';
 
 -- ------------------------------------------------------------
--- 2.10 pause_responses
+-- 2.12 pause_responses
 -- Respostas a pendências
 -- Colunas: id, pause_log_id, ticket_id, description_text, responded_by, created_at
 -- ------------------------------------------------------------
@@ -233,7 +280,7 @@ CREATE TABLE pause_responses (
 COMMENT='Respostas a pendências/pausas';
 
 -- ------------------------------------------------------------
--- 2.11 pause_response_files
+-- 2.13 pause_response_files
 -- Arquivos de respostas de pausa
 -- Colunas: id, pause_response_id, file_url, uploaded_by (nullable), created_at
 -- ------------------------------------------------------------
@@ -250,7 +297,7 @@ CREATE TABLE pause_response_files (
 COMMENT='Arquivos anexados a respostas de pendências';
 
 -- ------------------------------------------------------------
--- 2.12 assignment_control
+-- 2.14 assignment_control
 -- Controle de rodízio (round-robin) para auto-atribuição
 -- Colunas: id, last_assigned_user_id, updated_at
 -- ------------------------------------------------------------
@@ -278,6 +325,17 @@ INSERT INTO assignment_control (id) VALUES (UUID());
 --   ('Cliente', 'cliente', '<ADMIN_USER_ID>'),
 --   ('Ajuste', 'ajuste', '<ADMIN_USER_ID>'),
 --   ('Outro', 'outro', '<ADMIN_USER_ID>');
+
+-- 3.3 Níveis de setup padrão (exemplo)
+-- INSERT INTO setup_levels (label, value, created_by) VALUES
+--   ('Básico', 'basico', '<ADMIN_USER_ID>'),
+--   ('Intermediário', 'intermediario', '<ADMIN_USER_ID>'),
+--   ('Avançado', 'avancado', '<ADMIN_USER_ID>');
+
+-- 3.4 Times padrão (exemplo)
+-- INSERT INTO teams (label, value, created_by) VALUES
+--   ('Time Alpha', 'alpha', '<ADMIN_USER_ID>'),
+--   ('Time Beta', 'beta', '<ADMIN_USER_ID>');
 
 -- ============================================================
 -- 4. FUNÇÕES (STORED FUNCTIONS)
@@ -357,6 +415,8 @@ DELIMITER ;
 
 -- ------------------------------------------------------------
 -- 5.2 sp_pause_ticket — Pausar um chamado
+-- Valida que o ticket está em_andamento antes de pausar
+-- Cria o pause_log e atualiza o status do ticket atomicamente
 -- Uso: CALL sp_pause_ticket('ticket-uuid', 'reason-uuid', 'descrição', 'user-uuid');
 -- ------------------------------------------------------------
 DELIMITER //
@@ -397,6 +457,7 @@ DELIMITER ;
 
 -- ------------------------------------------------------------
 -- 5.3 sp_resume_ticket — Retomar um chamado pausado
+-- Calcula o tempo de pausa, atualiza total_paused_seconds e fecha o pause_log
 -- Uso: CALL sp_resume_ticket('ticket-uuid', 'user-uuid');
 -- ------------------------------------------------------------
 DELIMITER //
@@ -451,6 +512,8 @@ DELIMITER ;
 
 -- ------------------------------------------------------------
 -- 5.4 sp_finish_ticket — Finalizar um chamado
+-- Se estava pausado, acumula tempo de pausa antes de finalizar
+-- Calcula total_execution_seconds desde started_at
 -- Uso: CALL sp_finish_ticket('ticket-uuid', 'user-uuid');
 -- ------------------------------------------------------------
 DELIMITER //
@@ -522,6 +585,8 @@ DELIMITER ;
 
 -- ------------------------------------------------------------
 -- 5.5 sp_reopen_ticket — Reabrir um chamado (apenas supervisor)
+-- Valida que apenas supervisores podem reabrir
+-- Reseta finished_at e reinicia started_at
 -- Uso: CALL sp_reopen_ticket('ticket-uuid', 'supervisor-uuid');
 -- ------------------------------------------------------------
 DELIMITER //
@@ -562,9 +627,71 @@ END //
 
 DELIMITER ;
 
+-- ------------------------------------------------------------
+-- 5.6 sp_start_ticket — Iniciar um chamado não iniciado
+-- Atribui o analista e marca started_at
+-- Uso: CALL sp_start_ticket('ticket-uuid', 'user-uuid');
+-- ------------------------------------------------------------
+DELIMITER //
+
+CREATE PROCEDURE sp_start_ticket(
+  IN p_ticket_id CHAR(36),
+  IN p_user_id CHAR(36)
+)
+BEGIN
+  DECLARE v_old_status VARCHAR(50);
+
+  SELECT status INTO v_old_status FROM tickets WHERE id = p_ticket_id FOR UPDATE;
+
+  IF v_old_status IS NULL THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ticket não encontrado';
+  END IF;
+
+  IF v_old_status != 'nao_iniciado' THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Ticket já foi iniciado';
+  END IF;
+
+  UPDATE tickets
+  SET status = 'em_andamento',
+      started_at = NOW(6),
+      assigned_analyst_id = p_user_id
+  WHERE id = p_ticket_id;
+
+  INSERT INTO ticket_status_logs (ticket_id, changed_by, old_status, new_status)
+  VALUES (p_ticket_id, p_user_id, 'nao_iniciado', 'em_andamento');
+END //
+
+DELIMITER ;
+
+-- ------------------------------------------------------------
+-- 5.7 sp_bulk_import_tickets — Importação em massa de chamados
+-- Insere um ticket com todos os campos incluindo setup_level e team
+-- Uso: CALL sp_bulk_import_tickets('base', 'requester', 'user-uuid', 'alta', 'setup_questionario', 'desc', 'basico', 'alpha');
+-- ------------------------------------------------------------
+DELIMITER //
+
+CREATE PROCEDURE sp_bulk_import_tickets(
+  IN p_base_name TEXT,
+  IN p_requester_name TEXT,
+  IN p_requester_user_id CHAR(36),
+  IN p_priority VARCHAR(50),
+  IN p_type VARCHAR(255),
+  IN p_description TEXT,
+  IN p_setup_level VARCHAR(255),
+  IN p_team VARCHAR(255)
+)
+BEGIN
+  INSERT INTO tickets (base_name, requester_name, requester_user_id, priority, type, description, setup_level, team)
+  VALUES (p_base_name, p_requester_name, p_requester_user_id, p_priority, p_type, p_description, p_setup_level, p_team);
+END //
+
+DELIMITER ;
+
 -- ============================================================
 -- 6. TRIGGER: Auto-atribuição round-robin
 -- Equivalente ao auto_assign_ticket do PostgreSQL
+-- Quando um novo ticket é inserido, atribui automaticamente
+-- ao próximo backoffice disponível em rodízio
 -- ============================================================
 DELIMITER //
 
@@ -612,13 +739,17 @@ BEGIN
       END IF;
     END IF;
 
-    -- Atribuir ticket
+    -- Atribuir ticket e iniciar automaticamente
     IF v_next_analyst IS NOT NULL THEN
       UPDATE tickets
       SET assigned_analyst_id = v_next_analyst,
           status = 'em_andamento',
           started_at = NOW(6)
       WHERE id = NEW.id;
+
+      -- Registrar mudança de status
+      INSERT INTO ticket_status_logs (ticket_id, changed_by, old_status, new_status)
+      VALUES (NEW.id, v_next_analyst, 'nao_iniciado', 'em_andamento');
 
       -- Atualizar controle de rodízio
       UPDATE assignment_control
@@ -659,32 +790,62 @@ SELECT
 FROM pause_logs pl
 JOIN pause_reasons pr ON pl.pause_reason_id = pr.id;
 
--- 7.4 Tickets completos (analista + solicitante + tipo)
+-- 7.4 Tickets completos (analista + solicitante + tipo + setup_level + team)
 CREATE OR REPLACE VIEW vw_tickets_full AS
 SELECT
   t.*,
   analyst.name AS analyst_name,
   requester.name AS requester_profile_name,
-  tt.label AS type_label
+  tt.label AS type_label,
+  sl.label AS setup_level_label,
+  tm.label AS team_label
 FROM tickets t
 LEFT JOIN profiles analyst ON t.assigned_analyst_id = analyst.id
 LEFT JOIN profiles requester ON t.requester_user_id = requester.id
-LEFT JOIN ticket_types tt ON t.type = tt.value;
+LEFT JOIN ticket_types tt ON t.type = tt.value
+LEFT JOIN setup_levels sl ON t.setup_level = sl.value
+LEFT JOIN teams tm ON t.team = tm.value;
+
+-- 7.5 Resumo de pausas por ticket
+CREATE OR REPLACE VIEW vw_ticket_pause_summary AS
+SELECT
+  ticket_id,
+  COUNT(*) AS total_pauses,
+  SUM(paused_seconds) AS total_paused_secs,
+  MIN(pause_started_at) AS first_pause,
+  MAX(COALESCE(pause_ended_at, NOW(6))) AS last_pause_activity
+FROM pause_logs
+GROUP BY ticket_id;
+
+-- 7.6 Métricas por analista (backoffice)
+CREATE OR REPLACE VIEW vw_analyst_metrics AS
+SELECT
+  p.id AS analyst_id,
+  p.name AS analyst_name,
+  COUNT(t.id) AS total_tickets,
+  SUM(CASE WHEN t.status = 'finalizado' THEN 1 ELSE 0 END) AS finished_tickets,
+  SUM(CASE WHEN t.status = 'em_andamento' THEN 1 ELSE 0 END) AS active_tickets,
+  SUM(CASE WHEN t.status = 'pausado' THEN 1 ELSE 0 END) AS paused_tickets,
+  AVG(CASE WHEN t.status = 'finalizado' THEN t.total_execution_seconds ELSE NULL END) AS avg_exec_seconds,
+  AVG(CASE WHEN t.status = 'finalizado' THEN t.total_paused_seconds ELSE NULL END) AS avg_paused_seconds
+FROM profiles p
+INNER JOIN user_roles ur ON p.id = ur.user_id AND ur.role = 'backoffice'
+LEFT JOIN tickets t ON p.id = t.assigned_analyst_id
+GROUP BY p.id, p.name;
 
 -- ============================================================
--- 8. PROCEDURES DE VALIDAÇÃO DE ACESSO (Substituindo RLS)
+-- 8. FUNÇÕES DE VALIDAÇÃO DE ACESSO (Substituindo RLS)
 -- ============================================================
--- MySQL não possui Row Level Security. As regras abaixo devem
--- ser aplicadas na camada da aplicação (API/backend).
--- Estas procedures servem como referência e podem ser chamadas
--- pela API para validar permissões.
+-- MySQL não possui Row Level Security. As funções abaixo devem
+-- ser chamadas pela API/backend para validar permissões antes
+-- de executar queries.
 
 -- ------------------------------------------------------------
--- 8.1 sp_validate_ticket_access — Verifica se user pode ver um ticket
+-- 8.1 fn_can_access_ticket — Verifica se user pode ver um ticket
 -- Regra original (Supabase RLS):
 --   supervisor: acesso total
---   backoffice: apenas assigned_analyst_id = uid
---   analyst: apenas requester_user_id = uid
+--   backoffice: assigned_analyst_id = uid OU assigned_analyst_id IS NULL
+--   analyst: requester_user_id = uid
 -- Retorna: 1 = permitido, 0 = negado
 -- ------------------------------------------------------------
 DELIMITER //
@@ -703,11 +864,12 @@ BEGIN
     RETURN 1;
   END IF;
 
-  -- Backoffice: apenas tickets atribuídos a ele
+  -- Backoffice: tickets atribuídos a ele OU não atribuídos
   IF has_role(p_user_id, 'backoffice') THEN
     RETURN (
       SELECT COUNT(*) > 0 FROM tickets
-      WHERE id = p_ticket_id AND assigned_analyst_id = p_user_id
+      WHERE id = p_ticket_id
+        AND (assigned_analyst_id = p_user_id OR assigned_analyst_id IS NULL)
     );
   END IF;
 
@@ -735,14 +897,18 @@ CREATE PROCEDURE sp_get_visible_tickets(
 )
 BEGIN
   IF has_role(p_user_id, 'supervisor') THEN
-    SELECT * FROM tickets ORDER BY created_at DESC;
+    SELECT * FROM vw_tickets_full ORDER BY created_at DESC;
   ELSEIF has_role(p_user_id, 'backoffice') THEN
-    SELECT * FROM tickets WHERE assigned_analyst_id = p_user_id ORDER BY created_at DESC;
+    SELECT * FROM vw_tickets_full
+    WHERE assigned_analyst_id = p_user_id OR assigned_analyst_id IS NULL
+    ORDER BY created_at DESC;
   ELSEIF has_role(p_user_id, 'analyst') THEN
-    SELECT * FROM tickets WHERE requester_user_id = p_user_id ORDER BY created_at DESC;
+    SELECT * FROM vw_tickets_full
+    WHERE requester_user_id = p_user_id
+    ORDER BY created_at DESC;
   ELSE
     -- Nenhum acesso
-    SELECT * FROM tickets WHERE 1 = 0;
+    SELECT * FROM vw_tickets_full WHERE 1 = 0;
   END IF;
 END //
 
@@ -750,7 +916,7 @@ DELIMITER ;
 
 -- ------------------------------------------------------------
 -- 8.3 fn_can_update_ticket — Verifica se user pode atualizar um ticket
--- Mesma lógica do RLS de UPDATE
+-- Mesma lógica do RLS de UPDATE (idêntica ao SELECT)
 -- ------------------------------------------------------------
 DELIMITER //
 
@@ -784,6 +950,26 @@ READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
   RETURN has_role(p_user_id, 'analyst');
+END //
+
+DELIMITER ;
+
+-- ------------------------------------------------------------
+-- 8.5 fn_can_manage_config — Verifica se user pode gerenciar configs
+-- Aplicável a: ticket_types, setup_levels, teams, pause_reasons, requesters
+-- Regra: apenas supervisores podem INSERT/UPDATE
+-- ------------------------------------------------------------
+DELIMITER //
+
+CREATE FUNCTION fn_can_manage_config(
+  p_user_id CHAR(36)
+)
+RETURNS TINYINT(1)
+DETERMINISTIC
+READS SQL DATA
+SQL SECURITY DEFINER
+BEGIN
+  RETURN has_role(p_user_id, 'supervisor');
 END //
 
 DELIMITER ;
@@ -828,15 +1014,32 @@ CREATE TABLE IF NOT EXISTS audit_log (
 COMMENT='Log de auditoria do sistema';
 
 -- ============================================================
--- 11. REFERÊNCIA: STORAGE BUCKETS → Amazon S3
+-- 11. EVENTO: Limpeza de sessões expiradas
+-- Executa a cada hora para remover sessões vencidas
+-- Requer: SET GLOBAL event_scheduler = ON;
+-- ============================================================
+DELIMITER //
+
+CREATE EVENT IF NOT EXISTS evt_cleanup_expired_sessions
+ON SCHEDULE EVERY 1 HOUR
+STARTS CURRENT_TIMESTAMP
+DO
+BEGIN
+  DELETE FROM user_sessions WHERE expires_at < NOW();
+END //
+
+DELIMITER ;
+
+-- ============================================================
+-- 12. REFERÊNCIA: STORAGE BUCKETS → Amazon S3
 -- ============================================================
 -- No Supabase original existem 3 buckets de storage:
 --
--- | Bucket             | Público | Equivalente AWS              |
--- |--------------------|---------|------------------------------|
--- | pause-evidences    | Sim     | s3://seu-bucket/pause-evidences/    |
--- | ticket-attachments | Sim     | s3://seu-bucket/ticket-attachments/ |
--- | pause-responses    | Sim     | s3://seu-bucket/pause-responses/    |
+-- | Bucket             | Público | Equivalente AWS                       |
+-- |--------------------|---------|---------------------------------------|
+-- | pause-evidences    | Sim     | s3://seu-bucket/pause-evidences/      |
+-- | ticket-attachments | Sim     | s3://seu-bucket/ticket-attachments/   |
+-- | pause-responses    | Sim     | s3://seu-bucket/pause-responses/      |
 --
 -- Políticas de storage (converter para IAM/bucket policies):
 --
@@ -863,83 +1066,134 @@ COMMENT='Log de auditoria do sistema';
 --     "Resource": "arn:aws:s3:::seu-bucket/pause-evidences/*"
 --   }]
 -- }
+--
+-- Para uploads autenticados, use presigned URLs gerados pelo backend (Lambda).
 
 -- ============================================================
--- 12. REFERÊNCIA: EDGE FUNCTIONS → AWS Lambda
+-- 13. REFERÊNCIA: EDGE FUNCTIONS → AWS Lambda
 -- ============================================================
 -- As seguintes Supabase Edge Functions precisam ser reimplementadas:
 --
--- | Edge Function          | Descrição                          | Equivalente AWS          |
--- |------------------------|------------------------------------|--------------------------|
--- | bulk-import-tickets    | Importação em massa de chamados    | Lambda + API Gateway     |
--- | create-public-ticket   | Criação de ticket público (sem auth)| Lambda + API Gateway    |
--- | manage-users           | CRUD de usuários (service role)    | Lambda + Cognito/IAM     |
+-- | Edge Function          | Descrição                                  | Equivalente AWS          |
+-- |------------------------|--------------------------------------------|--------------------------|
+-- | bulk-import-tickets    | Importação em massa via planilha XLSX      | Lambda + API Gateway     |
+-- |                        | Campos: base_name, requester_name,         |                          |
+-- |                        | priority, type, description,               |                          |
+-- |                        | setup_level, team                          |                          |
+-- | create-public-ticket   | Criação de ticket público (sem auth)       | Lambda + API Gateway     |
+-- |                        | Com upload de anexo para S3                |                          |
+-- | get-public-tickets     | Consulta pública de tickets pelo           | Lambda + API Gateway     |
+-- |                        | requester_name (sem auth)                  |                          |
+-- | manage-users           | CRUD de usuários (service role)            | Lambda + Cognito/IAM     |
+-- |                        | Criar/deletar/listar usuários              |                          |
 --
 -- Cada Lambda deve:
--- 1. Validar JWT/sessão do chamador
+-- 1. Validar JWT/sessão do chamador (exceto endpoints públicos)
 -- 2. Verificar permissões usando has_role() ou fn_can_*()
 -- 3. Executar a operação no MySQL via conexão RDS
 -- 4. Retornar resultado em JSON
+-- 5. Para uploads de arquivo, gerar presigned URL do S3
 
 -- ============================================================
--- 13. REFERÊNCIA COMPLETA DE RLS → REGRAS DE API
+-- 14. REFERÊNCIA COMPLETA DE RLS → REGRAS DE API
 -- ============================================================
 -- Tabela de mapeamento de TODAS as políticas RLS para implementação na API:
 --
--- | Tabela                | Operação | Regra                                                      |
--- |-----------------------|----------|------------------------------------------------------------|
--- | profiles              | SELECT   | Qualquer autenticado pode ver todos                        |
--- | profiles              | UPDATE   | Apenas o próprio usuário (id = current_user_id)            |
--- | profiles              | INSERT   | Apenas via trigger/procedure (sp_create_user)              |
--- | profiles              | DELETE   | Não permitido                                              |
--- | user_roles            | SELECT   | Supervisor vê todos; outros apenas o próprio               |
--- | user_roles            | INSERT   | Não permitido (apenas via procedure)                       |
--- | user_roles            | UPDATE   | Não permitido                                              |
--- | user_roles            | DELETE   | Não permitido                                              |
--- | tickets               | SELECT   | Supervisor: todos; Backoffice: assigned; Analyst: próprios |
--- | tickets               | INSERT   | Analyst com requester_user_id = uid; ou público (edge fn)  |
--- | tickets               | UPDATE   | Supervisor: todos; Backoffice: assigned; Analyst: próprios |
--- | tickets               | DELETE   | Não permitido                                              |
--- | ticket_status_logs    | SELECT   | Qualquer autenticado                                       |
--- | ticket_status_logs    | INSERT   | Autenticado com changed_by = uid                           |
--- | ticket_status_logs    | UPDATE   | Não permitido                                              |
--- | ticket_status_logs    | DELETE   | Não permitido                                              |
--- | ticket_types          | SELECT   | Qualquer autenticado                                       |
--- | ticket_types          | INSERT   | Apenas supervisor                                          |
--- | ticket_types          | UPDATE   | Apenas supervisor                                          |
--- | ticket_types          | DELETE   | Não permitido                                              |
--- | pause_reasons         | SELECT   | Qualquer autenticado                                       |
--- | pause_reasons         | INSERT   | Apenas supervisor                                          |
--- | pause_reasons         | UPDATE   | Apenas supervisor                                          |
--- | pause_reasons         | DELETE   | Não permitido                                              |
--- | pause_logs            | SELECT   | Qualquer autenticado                                       |
--- | pause_logs            | INSERT   | Autenticado com created_by = uid                           |
--- | pause_logs            | UPDATE   | Qualquer autenticado                                       |
--- | pause_logs            | DELETE   | Não permitido                                              |
--- | pause_evidences       | SELECT   | Qualquer autenticado                                       |
--- | pause_evidences       | INSERT   | Autenticado com uploaded_by = uid                          |
--- | pause_evidences       | UPDATE   | Não permitido                                              |
--- | pause_evidences       | DELETE   | Não permitido                                              |
--- | pause_responses       | SELECT   | Qualquer autenticado                                       |
--- | pause_responses       | INSERT   | Autenticado com responded_by = uid                         |
--- | pause_responses       | UPDATE   | Não permitido                                              |
--- | pause_responses       | DELETE   | Não permitido                                              |
--- | pause_response_files  | SELECT   | Qualquer autenticado                                       |
--- | pause_response_files  | INSERT   | Autenticado com uploaded_by = uid                          |
--- | pause_response_files  | UPDATE   | Não permitido                                              |
--- | pause_response_files  | DELETE   | Não permitido                                              |
--- | requesters            | SELECT   | Público: apenas active=true; Autenticado: todos            |
--- | requesters            | INSERT   | Apenas supervisor                                          |
--- | requesters            | UPDATE   | Apenas supervisor                                          |
--- | requesters            | DELETE   | Não permitido                                              |
--- | assignment_control    | *        | Gerenciado internamente pelo trigger                       |
+-- | Tabela                | Operação | Regra                                                                     |
+-- |-----------------------|----------|---------------------------------------------------------------------------|
+-- | profiles              | SELECT   | Qualquer autenticado pode ver todos                                       |
+-- | profiles              | UPDATE   | Apenas o próprio usuário (id = current_user_id)                           |
+-- | profiles              | INSERT   | Apenas via trigger/procedure (sp_create_user)                             |
+-- | profiles              | DELETE   | Não permitido                                                             |
+-- | user_roles            | SELECT   | Supervisor vê todos; outros apenas o próprio                              |
+-- | user_roles            | INSERT   | Não permitido (apenas via procedure)                                      |
+-- | user_roles            | UPDATE   | Não permitido                                                             |
+-- | user_roles            | DELETE   | Não permitido                                                             |
+-- | tickets               | SELECT   | Supervisor: todos; Backoffice: assigned ou NULL; Analyst: próprios        |
+-- | tickets               | INSERT   | Analyst com requester_user_id = uid; ou público (edge fn)                 |
+-- | tickets               | UPDATE   | Supervisor: todos; Backoffice: assigned ou NULL; Analyst: próprios        |
+-- | tickets               | DELETE   | Não permitido                                                             |
+-- | ticket_status_logs    | SELECT   | Qualquer autenticado                                                      |
+-- | ticket_status_logs    | INSERT   | Autenticado com changed_by = uid                                          |
+-- | ticket_status_logs    | UPDATE   | Não permitido                                                             |
+-- | ticket_status_logs    | DELETE   | Não permitido                                                             |
+-- | ticket_types          | SELECT   | Autenticado: todos; Público: apenas active=true                           |
+-- | ticket_types          | INSERT   | Apenas supervisor                                                         |
+-- | ticket_types          | UPDATE   | Apenas supervisor                                                         |
+-- | ticket_types          | DELETE   | Não permitido                                                             |
+-- | setup_levels          | SELECT   | Autenticado: todos; Público: apenas active=true                           |
+-- | setup_levels          | INSERT   | Apenas supervisor                                                         |
+-- | setup_levels          | UPDATE   | Apenas supervisor                                                         |
+-- | setup_levels          | DELETE   | Não permitido                                                             |
+-- | teams                 | SELECT   | Autenticado: todos; Público: apenas active=true                           |
+-- | teams                 | INSERT   | Apenas supervisor                                                         |
+-- | teams                 | UPDATE   | Apenas supervisor                                                         |
+-- | teams                 | DELETE   | Não permitido                                                             |
+-- | pause_reasons         | SELECT   | Qualquer autenticado                                                      |
+-- | pause_reasons         | INSERT   | Apenas supervisor                                                         |
+-- | pause_reasons         | UPDATE   | Apenas supervisor                                                         |
+-- | pause_reasons         | DELETE   | Não permitido                                                             |
+-- | pause_logs            | SELECT   | Qualquer autenticado                                                      |
+-- | pause_logs            | INSERT   | Autenticado com created_by = uid                                          |
+-- | pause_logs            | UPDATE   | Qualquer autenticado                                                      |
+-- | pause_logs            | DELETE   | Não permitido                                                             |
+-- | pause_evidences       | SELECT   | Qualquer autenticado                                                      |
+-- | pause_evidences       | INSERT   | Autenticado com uploaded_by = uid                                         |
+-- | pause_evidences       | UPDATE   | Não permitido                                                             |
+-- | pause_evidences       | DELETE   | Não permitido                                                             |
+-- | pause_responses       | SELECT   | Qualquer autenticado                                                      |
+-- | pause_responses       | INSERT   | Autenticado com responded_by = uid                                        |
+-- | pause_responses       | UPDATE   | Não permitido                                                             |
+-- | pause_responses       | DELETE   | Não permitido                                                             |
+-- | pause_response_files  | SELECT   | Qualquer autenticado                                                      |
+-- | pause_response_files  | INSERT   | Autenticado com uploaded_by = uid                                         |
+-- | pause_response_files  | UPDATE   | Não permitido                                                             |
+-- | pause_response_files  | DELETE   | Não permitido                                                             |
+-- | requesters            | SELECT   | Público: apenas active=true; Autenticado: todos                           |
+-- | requesters            | INSERT   | Apenas supervisor                                                         |
+-- | requesters            | UPDATE   | Apenas supervisor                                                         |
+-- | requesters            | DELETE   | Não permitido                                                             |
+-- | assignment_control    | *        | Gerenciado internamente pelo trigger (sem acesso direto pela API)         |
 
 -- ============================================================
--- FIM DO SCRIPT
+-- 15. CHECKLIST DE VERIFICAÇÃO PÓS-INSTALAÇÃO
 -- ============================================================
--- Para verificar a instalação:
--- SHOW TABLES;
--- SHOW FUNCTION STATUS WHERE Db = 'painel_chamados';
--- SHOW PROCEDURE STATUS WHERE Db = 'painel_chamados';
--- SHOW TRIGGERS FROM painel_chamados;
--- SELECT * FROM information_schema.views WHERE table_schema = 'painel_chamados';
+-- Execute os comandos abaixo para verificar a instalação:
+--
+-- 1. Listar todas as tabelas:
+--    SHOW TABLES;
+--
+-- 2. Verificar funções:
+--    SHOW FUNCTION STATUS WHERE Db = 'painel_chamados';
+--    -- Esperado: has_role, get_user_role, fn_can_access_ticket,
+--    --           fn_can_update_ticket, fn_can_insert_ticket, fn_can_manage_config
+--
+-- 3. Verificar procedures:
+--    SHOW PROCEDURE STATUS WHERE Db = 'painel_chamados';
+--    -- Esperado: sp_create_user, sp_pause_ticket, sp_resume_ticket,
+--    --           sp_finish_ticket, sp_reopen_ticket, sp_start_ticket,
+--    --           sp_bulk_import_tickets, sp_get_visible_tickets
+--
+-- 4. Verificar triggers:
+--    SHOW TRIGGERS FROM painel_chamados;
+--    -- Esperado: trg_auto_assign_ticket
+--
+-- 5. Verificar views:
+--    SELECT * FROM information_schema.views WHERE table_schema = 'painel_chamados';
+--    -- Esperado: vw_tickets_with_analyst, vw_tickets_with_requester,
+--    --           vw_pause_logs_with_reason, vw_tickets_full,
+--    --           vw_ticket_pause_summary, vw_analyst_metrics
+--
+-- 6. Verificar eventos:
+--    SHOW EVENTS FROM painel_chamados;
+--    -- Esperado: evt_cleanup_expired_sessions
+--
+-- 7. Verificar contagem de tabelas (esperado: 16):
+--    SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'painel_chamados';
+--
+-- 8. Testar criação de usuário:
+--    CALL sp_create_user(UUID(), 'Teste Admin', 'supervisor');
+--
+-- ============================================================
+-- FIM DO SCRIPT DE MIGRAÇÃO
+-- ============================================================
