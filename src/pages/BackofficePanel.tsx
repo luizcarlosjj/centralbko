@@ -12,11 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal, Search } from 'lucide-react';
+import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal, Search, Target, PlayCircle } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TicketStatus, PauseLog, Profile } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
+import { calculateBusinessSeconds } from '@/lib/business-time';
 
 const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, description';
 const PAGE_SIZE = 20;
@@ -139,6 +140,39 @@ const AnalystPanel = () => {
     staleTime: 120_000,
   });
 
+  // Query all finished tickets for this user (for Meta 48h card)
+  const { data: allMyFinished = [] } = useQuery({
+    queryKey: ['backoffice-all-finished-meta', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const all: any[] = [];
+      let offset = 0;
+      while (true) {
+        const { data } = await supabase
+          .from('tickets')
+          .select('id, created_at, finished_at')
+          .eq('assigned_analyst_id', user.id)
+          .eq('status', 'finalizado')
+          .range(offset, offset + 999);
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < 1000) break;
+        offset += 1000;
+      }
+      return all as { id: string; created_at: string; finished_at: string | null }[];
+    },
+    enabled: !!user,
+    staleTime: 60_000,
+  });
+
+  const FORTY_EIGHT_HOURS_BIZ = 48 * 3600;
+  const myFinishedWithin48h = allMyFinished.filter(t => {
+    if (!t.finished_at) return false;
+    const bizSecs = calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at));
+    return bizSecs <= FORTY_EIGHT_HOURS_BIZ;
+  }).length;
+  const myMeta48hRate = allMyFinished.length > 0 ? ((myFinishedWithin48h / allMyFinished.length) * 100).toFixed(1) : '0.0';
+
   const openTickets = openData?.tickets || [];
   const openTotal = openData?.count || 0;
   const finishedTickets = finishedData?.tickets || [];
@@ -151,6 +185,7 @@ const AnalystPanel = () => {
     queryClient.invalidateQueries({ queryKey: ['analyst-open-tickets'] });
     queryClient.invalidateQueries({ queryKey: ['analyst-finished-tickets'] });
     queryClient.invalidateQueries({ queryKey: ['backoffice-unassigned-tickets'] });
+    queryClient.invalidateQueries({ queryKey: ['backoffice-all-finished-meta'] });
   }, [queryClient]);
 
   // Realtime subscription for live updates
@@ -198,17 +233,17 @@ const AnalystPanel = () => {
     let pausedSeconds = ticket.total_paused_seconds || 0;
 
     if (ticket.status === 'em_andamento' && ticket.started_at) {
-      execSeconds += Math.floor((now.getTime() - new Date(ticket.started_at).getTime()) / 1000);
+      execSeconds += calculateBusinessSeconds(new Date(ticket.started_at), now);
     }
 
     if (ticket.status === 'pausado') {
       const { data: activePause } = await supabase.from('pause_logs').select('id, pause_started_at').eq('ticket_id', ticket.id).is('pause_ended_at', null).single();
       if (activePause) {
-        const pausedSecs = Math.floor((now.getTime() - new Date((activePause as any).pause_started_at).getTime()) / 1000);
+        const pausedSecs = calculateBusinessSeconds(new Date((activePause as any).pause_started_at), now);
         await supabase.from('pause_logs').update({ pause_ended_at: now.toISOString(), paused_seconds: pausedSecs } as any).eq('id', (activePause as any).id);
       }
       if (ticket.pause_started_at) {
-        pausedSeconds += Math.floor((now.getTime() - new Date(ticket.pause_started_at).getTime()) / 1000);
+        pausedSeconds += calculateBusinessSeconds(new Date(ticket.pause_started_at), now);
       }
     }
 
@@ -290,6 +325,34 @@ const AnalystPanel = () => {
     <AppLayout>
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-foreground">Painel do Analista</h1>
+
+        {/* Meta 48h Card */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-primary">Meta 48h</CardTitle>
+              <Target className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-primary">{myMeta48hRate}%</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{myFinishedWithin48h}/{allMyFinished.length} concluídos em 48h úteis</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Em Aberto</CardTitle>
+              <PlayCircle className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent><p className="text-3xl font-bold text-primary">{openTotal}</p></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Finalizados</CardTitle>
+              <CheckCircle className="h-4 w-4 text-success" />
+            </CardHeader>
+            <CardContent><p className="text-3xl font-bold text-success">{finishedTotal}</p></CardContent>
+          </Card>
+        </div>
 
         <Tabs defaultValue="unassigned" className="w-full">
           <TabsList>

@@ -10,11 +10,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Play } from 'lucide-react';
+import { RotateCcw, ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Play, Target } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, Profile, PauseLog } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
 import { Link } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
+import { calculateBusinessSeconds } from '@/lib/business-time';
 
 const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, assigned_analyst_id, total_execution_seconds, total_paused_seconds, started_at, created_at, finished_at, pause_started_at, description';
 const PAGE_SIZE = 20;
@@ -109,6 +110,28 @@ const SupervisorPanel = () => {
     staleTime: 30_000,
   });
 
+  // Global query for all finished tickets (for avg time and Meta 48h)
+  const { data: allFinishedTickets = [] } = useQuery({
+    queryKey: ['supervisor-all-finished'],
+    queryFn: async () => {
+      const all: any[] = [];
+      let offset = 0;
+      while (true) {
+        const { data } = await supabase
+          .from('tickets')
+          .select('id, created_at, finished_at, total_execution_seconds')
+          .eq('status', 'finalizado')
+          .range(offset, offset + 999);
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < 1000) break;
+        offset += 1000;
+      }
+      return all as { id: string; created_at: string; finished_at: string | null; total_execution_seconds: number }[];
+    },
+    staleTime: 60_000,
+  });
+
   const tickets = ticketData?.tickets || [];
   const totalCount = ticketData?.count || 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
@@ -198,20 +221,20 @@ const SupervisorPanel = () => {
       .limit(1);
 
     const activeLog = activeLogs?.[0];
+    const now = new Date();
     if (activeLog) {
-      const pauseStart = new Date(activeLog.pause_started_at).getTime();
-      const pausedSecs = Math.floor((Date.now() - pauseStart) / 1000);
+      const pausedSecs = calculateBusinessSeconds(new Date(activeLog.pause_started_at), now);
       await supabase.from('pause_logs').update({
-        pause_ended_at: new Date().toISOString(),
+        pause_ended_at: now.toISOString(),
         paused_seconds: pausedSecs,
       } as any).eq('id', activeLog.id);
     }
 
-    const additionalPaused = activeLog ? Math.floor((Date.now() - new Date(activeLog.pause_started_at).getTime()) / 1000) : 0;
+    const additionalPaused = activeLog ? calculateBusinessSeconds(new Date(activeLog.pause_started_at), now) : 0;
 
     await supabase.from('tickets').update({
       status: 'em_andamento',
-      started_at: new Date().toISOString(),
+      started_at: now.toISOString(),
       pause_started_at: null,
       total_paused_seconds: (ticket.total_paused_seconds || 0) + additionalPaused,
     } as any).eq('id', ticket.id);
@@ -240,10 +263,17 @@ const SupervisorPanel = () => {
   const globalPaused = statusCounts?.paused || 0;
   const globalFinished = statusCounts?.finished || 0;
   const globalTotal = statusCounts?.total || 0;
-  const finishedAll = tickets.filter(t => t.status === 'finalizado');
-  const avgTime = finishedAll.length > 0
-    ? Math.round(finishedAll.reduce((a, t) => a + (t.total_execution_seconds || 0), 0) / finishedAll.length)
+  const globalAvgTime = allFinishedTickets.length > 0
+    ? Math.round(allFinishedTickets.reduce((a, t) => a + (t.total_execution_seconds || 0), 0) / allFinishedTickets.length)
     : 0;
+
+  const FORTY_EIGHT_HOURS_BIZ = 48 * 3600;
+  const finishedWithin48h = allFinishedTickets.filter(t => {
+    if (!t.finished_at) return false;
+    const bizSecs = calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at));
+    return bizSecs <= FORTY_EIGHT_HOURS_BIZ;
+  }).length;
+  const meta48hRate = allFinishedTickets.length > 0 ? ((finishedWithin48h / allFinishedTickets.length) * 100).toFixed(1) : '0.0';
 
   return (
     <AppLayout>
@@ -255,7 +285,7 @@ const SupervisorPanel = () => {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total</CardTitle>
@@ -289,7 +319,17 @@ const SupervisorPanel = () => {
               <CardTitle className="text-sm font-medium text-muted-foreground">Tempo Médio</CardTitle>
               <Clock className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
-            <CardContent><p className="text-3xl font-bold">{formatTime(avgTime)}</p></CardContent>
+            <CardContent><p className="text-3xl font-bold">{formatTime(globalAvgTime)}</p></CardContent>
+          </Card>
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-primary">Meta 48h</CardTitle>
+              <Target className="h-4 w-4 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold text-primary">{meta48hRate}%</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{finishedWithin48h}/{allFinishedTickets.length} em 48h úteis</p>
+            </CardContent>
           </Card>
         </div>
 

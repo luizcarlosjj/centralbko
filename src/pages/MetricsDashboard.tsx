@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { calculateBusinessSeconds } from '@/lib/business-time';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -76,14 +77,14 @@ const MetricsDashboard = () => {
   // Taxa de conclusão: (finalizados + pausados) / total recebidos
   const conclusionRate = total > 0 ? (((finished + paused) / total) * 100).toFixed(1) : '0.0';
 
-  // Meta 48h: (finalizados em até 48h + pausados) / total recebidos
-  const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+  // Meta 48h: finalizados em até 48h úteis / total finalizados
+  const FORTY_EIGHT_HOURS_BIZ = 48 * 3600; // 172800 business seconds
   const finishedWithin48h = finishedTickets.filter(t => {
     if (!t.finished_at) return false;
-    const elapsed = new Date(t.finished_at).getTime() - new Date(t.created_at).getTime();
-    return elapsed <= FORTY_EIGHT_HOURS_MS;
+    const bizSecs = calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at));
+    return bizSecs <= FORTY_EIGHT_HOURS_BIZ;
   }).length;
-  const meta48hRate = total > 0 ? (((finishedWithin48h + paused) / total) * 100).toFixed(1) : '0.0';
+  const meta48hRate = finished > 0 ? ((finishedWithin48h / finished) * 100).toFixed(1) : '0.0';
 
   const formatTime = (seconds: number) => {
     const d = Math.floor(seconds / 86400);
