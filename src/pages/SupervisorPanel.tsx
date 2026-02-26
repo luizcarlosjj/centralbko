@@ -316,9 +316,7 @@ const SupervisorPanel = () => {
 
   const FORTY_EIGHT_HOURS_BIZ = 63360; // 2 dias úteis = 17h36min
   const finishedWithin48h = allFinishedTickets.filter(t => {
-    if (!t.finished_at) return false;
-    const bizSecs = calculateBusinessSeconds(new Date(t.created_at), new Date(t.finished_at));
-    return bizSecs <= FORTY_EIGHT_HOURS_BIZ;
+    return (t.total_execution_seconds || 0) <= FORTY_EIGHT_HOURS_BIZ;
   }).length;
   const meta48hRate = allFinishedTickets.length > 0 ? ((finishedWithin48h / allFinishedTickets.length) * 100).toFixed(1) : '0.0';
 
