@@ -172,23 +172,12 @@ const AnalystPanel = () => {
     staleTime: 60_000,
   });
 
-  const { data: allTeamFinished = [] } = useQuery({
+  const { data: teamMetaStats } = useQuery({
     queryKey: ['backoffice-team-finished-meta'],
     queryFn: async () => {
-      const all: any[] = [];
-      let offset = 0;
-      while (true) {
-        const { data } = await supabase
-          .from('tickets')
-          .select('id, total_execution_seconds')
-          .eq('status', 'finalizado')
-          .range(offset, offset + 999);
-        if (!data || data.length === 0) break;
-        all.push(...data);
-        if (data.length < 1000) break;
-        offset += 1000;
-      }
-      return all as { id: string; total_execution_seconds: number }[];
+      const { data, error } = await supabase.rpc('get_team_meta_stats');
+      if (error) throw error;
+      return data as { total: number; within_meta: number };
     },
     staleTime: 60_000,
   });
@@ -199,10 +188,9 @@ const AnalystPanel = () => {
   }).length;
   const myMeta48hRate = allMyFinished.length > 0 ? ((myFinishedWithin48h / allMyFinished.length) * 100).toFixed(1) : '0.0';
 
-  const teamFinishedWithin48h = allTeamFinished.filter(t => {
-    return (t.total_execution_seconds || 0) <= FORTY_EIGHT_HOURS_BIZ;
-  }).length;
-  const teamMeta48hRate = allTeamFinished.length > 0 ? ((teamFinishedWithin48h / allTeamFinished.length) * 100).toFixed(1) : '0.0';
+  const teamFinishedWithin48h = teamMetaStats?.within_meta ?? 0;
+  const teamFinishedTotal = teamMetaStats?.total ?? 0;
+  const teamMeta48hRate = teamFinishedTotal > 0 ? ((teamFinishedWithin48h / teamFinishedTotal) * 100).toFixed(1) : '0.0';
 
   const openTickets = openData?.tickets || [];
   const openTotal = openData?.count || 0;
@@ -425,7 +413,7 @@ const AnalystPanel = () => {
             </CardHeader>
             <CardContent>
               <p className="text-3xl font-bold text-success">{teamMeta48hRate}%</p>
-              <p className="text-[10px] text-muted-foreground mt-1">{teamFinishedWithin48h}/{allTeamFinished.length} do time em 2 dias úteis</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{teamFinishedWithin48h}/{teamFinishedTotal} do time em 2 dias úteis</p>
             </CardContent>
           </Card>
           <Card className="border-primary/30 bg-primary/5">
