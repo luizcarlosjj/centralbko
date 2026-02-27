@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
 
     const ticketId = crypto.randomUUID();
     const uploadedUrls: string[] = [];
-    const ALLOWED_EXTS = ['xlsx', 'xls', 'csv', 'pdf', 'zip'];
+    const ALLOWED_EXTS = ['xlsx', 'xls', 'csv', 'pdf', 'zip', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'rtf', 'odt', 'ods', 'odp', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tiff', 'tif', 'rar', '7z'];
     const DANGEROUS_EXTS = ['exe', 'bat', 'cmd', 'msi', 'scr', 'pif', 'com', 'vbs', 'js', 'ws', 'wsf', 'ps1', 'sh'];
     const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
