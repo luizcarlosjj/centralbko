@@ -1,7 +1,7 @@
 -- ============================================================
 -- MIGRAÇÃO COMPLETA: PostgreSQL (Supabase) → MySQL 8.0+ (AWS RDS)
 -- Projeto: Painel de Gestão de Chamados
--- Atualizado em: 2026-02-25
+-- Atualizado em: 2026-02-27
 -- Compatível com: MySQL 8.0+ / Amazon RDS MySQL / Aurora MySQL
 -- 
 -- INSTRUÇÕES:
@@ -13,6 +13,11 @@
 -- 6. Storage policies foram documentadas para implementação com S3
 -- 7. Tabelas setup_levels e teams incluídas (adicionadas ao sistema)
 -- 8. Campos setup_level e team na tabela tickets incluídos
+-- 9. Supervisor pode deletar tickets, logs de status, pausas, evidências e respostas
+-- 10. Anexos expandidos: documentos (doc/docx/pdf/txt/rtf/odt), planilhas (xlsx/xls/csv/ods),
+--     apresentações (ppt/pptx/odp), imagens (jpg/jpeg/png/gif/bmp/webp/svg/tiff/tif),
+--     arquivos compactados (zip/rar/7z). Máximo 10MB por arquivo.
+-- 11. Suporte a múltiplos anexos por ticket (attachment_url armazena JSON array de URLs)
 -- ============================================================
 
 SET NAMES utf8mb4;
@@ -162,7 +167,7 @@ CREATE TABLE tickets (
   total_paused_seconds INT NOT NULL DEFAULT 0,
   assigned_analyst_id CHAR(36) DEFAULT NULL,
   pause_started_at DATETIME(6) DEFAULT NULL,
-  attachment_url TEXT DEFAULT NULL,
+  attachment_url TEXT DEFAULT NULL COMMENT 'JSON array de URLs de anexos ou URL única. Tipos permitidos: doc,docx,pdf,txt,rtf,odt,xlsx,xls,csv,ods,ppt,pptx,odp,jpg,jpeg,png,gif,bmp,webp,svg,tiff,tif,zip,rar,7z. Máx 10MB/arquivo',
   setup_level VARCHAR(255) DEFAULT NULL COMMENT 'Referência ao value de setup_levels (pode ser NULL)',
   team VARCHAR(255) DEFAULT NULL COMMENT 'Referência ao value de teams (pode ser NULL)',
   PRIMARY KEY (id),
@@ -1081,11 +1086,18 @@ DELIMITER ;
 -- |                        | priority, type, description,               |                          |
 -- |                        | setup_level, team                          |                          |
 -- | create-public-ticket   | Criação de ticket público (sem auth)       | Lambda + API Gateway     |
--- |                        | Com upload de anexo para S3                |                          |
+-- |                        | Com upload de múltiplos anexos para S3      |                          |
+-- |                        | Tipos permitidos: doc, docx, pdf, txt,     |                          |
+-- |                        | rtf, odt, xlsx, xls, csv, ods, ppt, pptx,  |                          |
+-- |                        | odp, jpg, jpeg, png, gif, bmp, webp, svg,  |                          |
+-- |                        | tiff, tif, zip, rar, 7z (máx 10MB/arquivo) |                          |
+-- |                        | attachment_url salvo como JSON array        |                          |
 -- | get-public-tickets     | Consulta pública de tickets pelo           | Lambda + API Gateway     |
 -- |                        | requester_name (sem auth)                  |                          |
 -- | manage-users           | CRUD de usuários (service role)            | Lambda + Cognito/IAM     |
 -- |                        | Criar/deletar/listar usuários              |                          |
+-- | recalculate-business-  | Recalcula tempo útil de execução            | Lambda                   |
+-- |   time                 | dos tickets (ferramenta administrativa)     |                          |
 --
 -- Cada Lambda deve:
 -- 1. Validar JWT/sessão do chamador (exceto endpoints públicos)
@@ -1093,6 +1105,8 @@ DELIMITER ;
 -- 3. Executar a operação no MySQL via conexão RDS
 -- 4. Retornar resultado em JSON
 -- 5. Para uploads de arquivo, gerar presigned URL do S3
+-- 6. Validar extensões de arquivo contra lista de permitidos
+-- 7. Bloquear extensões perigosas (exe, bat, cmd, msi, scr, etc.)
 
 -- ============================================================
 -- 14. REFERÊNCIA COMPLETA DE RLS → REGRAS DE API
@@ -1112,11 +1126,11 @@ DELIMITER ;
 -- | tickets               | SELECT   | Supervisor: todos; Backoffice: assigned ou NULL; Analyst: próprios        |
 -- | tickets               | INSERT   | Analyst com requester_user_id = uid; ou público (edge fn)                 |
 -- | tickets               | UPDATE   | Supervisor: todos; Backoffice: assigned ou NULL; Analyst: próprios        |
--- | tickets               | DELETE   | Não permitido                                                             |
+-- | tickets               | DELETE   | Apenas supervisor                                                         |
 -- | ticket_status_logs    | SELECT   | Qualquer autenticado                                                      |
 -- | ticket_status_logs    | INSERT   | Autenticado com changed_by = uid                                          |
 -- | ticket_status_logs    | UPDATE   | Não permitido                                                             |
--- | ticket_status_logs    | DELETE   | Não permitido                                                             |
+-- | ticket_status_logs    | DELETE   | Apenas supervisor                                                         |
 -- | ticket_types          | SELECT   | Autenticado: todos; Público: apenas active=true                           |
 -- | ticket_types          | INSERT   | Apenas supervisor                                                         |
 -- | ticket_types          | UPDATE   | Apenas supervisor                                                         |
@@ -1136,27 +1150,47 @@ DELIMITER ;
 -- | pause_logs            | SELECT   | Qualquer autenticado                                                      |
 -- | pause_logs            | INSERT   | Autenticado com created_by = uid                                          |
 -- | pause_logs            | UPDATE   | Qualquer autenticado                                                      |
--- | pause_logs            | DELETE   | Não permitido                                                             |
+-- | pause_logs            | DELETE   | Apenas supervisor                                                         |
 -- | pause_evidences       | SELECT   | Qualquer autenticado                                                      |
 -- | pause_evidences       | INSERT   | Autenticado com uploaded_by = uid                                         |
 -- | pause_evidences       | UPDATE   | Não permitido                                                             |
--- | pause_evidences       | DELETE   | Não permitido                                                             |
+-- | pause_evidences       | DELETE   | Apenas supervisor                                                         |
 -- | pause_responses       | SELECT   | Qualquer autenticado                                                      |
 -- | pause_responses       | INSERT   | Autenticado com responded_by = uid                                        |
 -- | pause_responses       | UPDATE   | Não permitido                                                             |
--- | pause_responses       | DELETE   | Não permitido                                                             |
+-- | pause_responses       | DELETE   | Apenas supervisor                                                         |
 -- | pause_response_files  | SELECT   | Qualquer autenticado                                                      |
 -- | pause_response_files  | INSERT   | Autenticado com uploaded_by = uid                                         |
 -- | pause_response_files  | UPDATE   | Não permitido                                                             |
--- | pause_response_files  | DELETE   | Não permitido                                                             |
+-- | pause_response_files  | DELETE   | Apenas supervisor                                                         |
 -- | requesters            | SELECT   | Público: apenas active=true; Autenticado: todos                           |
 -- | requesters            | INSERT   | Apenas supervisor                                                         |
 -- | requesters            | UPDATE   | Apenas supervisor                                                         |
 -- | requesters            | DELETE   | Não permitido                                                             |
 -- | assignment_control    | *        | Gerenciado internamente pelo trigger (sem acesso direto pela API)         |
+--
+-- ============================================================
+-- 15. REFERÊNCIA: TIPOS DE ARQUIVO PERMITIDOS
+-- ============================================================
+-- Extensões permitidas para upload de anexos:
+--
+-- | Categoria      | Extensões                                                |
+-- |----------------|----------------------------------------------------------|
+-- | Documentos     | doc, docx, pdf, txt, rtf, odt                            |
+-- | Planilhas      | xlsx, xls, csv, ods                                      |
+-- | Apresentações  | ppt, pptx, odp                                           |
+-- | Imagens        | jpg, jpeg, png, gif, bmp, webp, svg, tiff, tif           |
+-- | Compactados    | zip, rar, 7z                                             |
+--
+-- Extensões BLOQUEADAS (segurança):
+-- exe, bat, cmd, msi, scr, pif, com, vbs, js, ws, wsf, ps1, sh
+--
+-- Tamanho máximo por arquivo: 10MB
+-- Validação de MIME type: leniente (aceita application/octet-stream como fallback)
+-- attachment_url na tabela tickets: armazena JSON array de URLs (ex: ["url1","url2"])
 
 -- ============================================================
--- 15. CHECKLIST DE VERIFICAÇÃO PÓS-INSTALAÇÃO
+-- 16. CHECKLIST DE VERIFICAÇÃO PÓS-INSTALAÇÃO
 -- ============================================================
 -- Execute os comandos abaixo para verificar a instalação:
 --
