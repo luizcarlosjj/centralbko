@@ -109,7 +109,9 @@ const PublicTicketForm = () => {
         '.7z': ['application/x-7z-compressed'],
       };
       const expectedMimes = validMimes[ext] || [];
-      if (file.type && expectedMimes.length > 0 && !expectedMimes.includes(file.type)) {
+      // Be lenient: only block if MIME is set, expected list exists, AND it's not a generic type
+      const genericMimes = ['application/octet-stream', 'application/download', 'binary/octet-stream', ''];
+      if (file.type && expectedMimes.length > 0 && !expectedMimes.includes(file.type) && !genericMimes.includes(file.type)) {
         setFileError(`Tipo de arquivo suspeito: ${file.name}. O conteúdo não corresponde à extensão.`);
         return;
       }
