@@ -14,8 +14,8 @@ import { Send, Paperclip, X, FileSpreadsheet, Plus } from 'lucide-react';
 import { PRIORITY_LABELS, type TicketPriority } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
 
-const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
-const MAX_FILE_SIZE_MB = 5;
+const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.pdf', '.zip', '.doc', '.docx', '.ppt', '.pptx', '.txt', '.rtf', '.odt', '.ods', '.odp', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.tif', '.rar', '.7z'];
+const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const MAX_FILES = 10;
 
@@ -235,7 +235,7 @@ const NewTicket = () => {
                     </span>
                   </div>
                 )}
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFileChange} className="hidden" multiple />
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf,.zip,.doc,.docx,.ppt,.pptx,.txt,.rtf,.odt,.ods,.odp,.jpg,.jpeg,.png,.gif,.bmp,.webp,.svg,.tiff,.tif,.rar,.7z" onChange={handleFileChange} className="hidden" multiple />
                 {fileError && <p className="text-sm text-destructive">{fileError}</p>}
                 <p className="text-xs text-muted-foreground">{attachments.length}/{MAX_FILES} arquivos</p>
               </div>

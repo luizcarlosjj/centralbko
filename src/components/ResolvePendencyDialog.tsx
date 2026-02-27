@@ -36,8 +36,10 @@ const ResolvePendencyDialog: React.FC<ResolvePendencyDialogProps> = ({
       setFileError('Arquivo muito grande. Máximo: 5MB');
       return;
     }
-    if (!f.type.startsWith('image/')) {
-      setFileError('Apenas imagens são permitidas.');
+    const allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'tiff', 'tif', 'pdf', 'doc', 'docx', 'xlsx', 'xls', 'csv', 'zip', 'rar', '7z', 'txt', 'rtf', 'ppt', 'pptx'];
+    const ext = f.name.split('.').pop()?.toLowerCase() || '';
+    if (!allowedExts.includes(ext)) {
+      setFileError(`Formato não permitido: .${ext}`);
       return;
     }
     setFile(f);
@@ -136,14 +138,14 @@ const ResolvePendencyDialog: React.FC<ResolvePendencyDialogProps> = ({
             />
           </div>
           <div className="space-y-2">
-            <Label>Imagem comprobatória *</Label>
+            <Label>Arquivo comprobatório *</Label>
             {!file ? (
               <div
                 className="flex items-center gap-2 cursor-pointer rounded-lg border-2 border-dashed p-3 transition-colors hover:border-primary/40 border-border bg-muted/30"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Paperclip className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Clique para anexar imagem — máx 5MB</span>
+                <span className="text-sm text-muted-foreground">Clique para anexar arquivo — máx 5MB</span>
               </div>
             ) : (
               <div className="flex items-center gap-2 rounded-lg border p-3 border-border bg-muted/10">
@@ -153,7 +155,7 @@ const ResolvePendencyDialog: React.FC<ResolvePendencyDialogProps> = ({
                 </button>
               </div>
             )}
-            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+            <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.csv,.zip,.txt,.rtf,.rar,.7z,.ppt,.pptx" onChange={handleFileChange} className="hidden" />
             {fileError && <p className="text-sm text-destructive">{fileError}</p>}
           </div>
           <Button

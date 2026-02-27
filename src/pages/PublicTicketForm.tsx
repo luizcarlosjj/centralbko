@@ -12,7 +12,7 @@ import { Send, Paperclip, X, FileSpreadsheet, ArrowLeft, Headphones, Plus, FileT
 import { PRIORITY_LABELS, type TicketPriority } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
 
-const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.pdf', '.zip'];
+const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.pdf', '.zip', '.doc', '.docx', '.ppt', '.pptx', '.txt', '.rtf', '.odt', '.ods', '.odp', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.tif', '.rar', '.7z'];
 const DANGEROUS_ZIP_EXTENSIONS = ['.exe', '.bat', '.cmd', '.msi', '.scr', '.pif', '.com', '.vbs', '.js', '.ws', '.wsf', '.ps1', '.sh'];
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -92,6 +92,21 @@ const PublicTicketForm = () => {
         '.csv': ['text/csv', 'application/vnd.ms-excel', 'text/plain'],
         '.pdf': ['application/pdf'],
         '.zip': ['application/zip', 'application/x-zip-compressed', 'application/x-zip'],
+        '.doc': ['application/msword'],
+        '.docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        '.ppt': ['application/vnd.ms-powerpoint'],
+        '.pptx': ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+        '.jpg': ['image/jpeg'],
+        '.jpeg': ['image/jpeg'],
+        '.png': ['image/png'],
+        '.gif': ['image/gif'],
+        '.webp': ['image/webp'],
+        '.svg': ['image/svg+xml'],
+        '.bmp': ['image/bmp'],
+        '.tiff': ['image/tiff'],
+        '.tif': ['image/tiff'],
+        '.rar': ['application/x-rar-compressed', 'application/vnd.rar'],
+        '.7z': ['application/x-7z-compressed'],
       };
       const expectedMimes = validMimes[ext] || [];
       if (file.type && expectedMimes.length > 0 && !expectedMimes.includes(file.type)) {
@@ -308,7 +323,7 @@ const PublicTicketForm = () => {
                     </span>
                   </div>
                 )}
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf,.zip" onChange={handleFileChange} className="hidden" multiple />
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.pdf,.zip,.doc,.docx,.ppt,.pptx,.txt,.rtf,.odt,.ods,.odp,.jpg,.jpeg,.png,.gif,.bmp,.webp,.svg,.tiff,.tif,.rar,.7z" onChange={handleFileChange} className="hidden" multiple />
                 {fileError && <p className="text-sm text-destructive">{fileError}</p>}
                 <p className="text-xs text-muted-foreground">{attachments.length}/{MAX_FILES} arquivos</p>
               </div>

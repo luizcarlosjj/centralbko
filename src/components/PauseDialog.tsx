@@ -156,12 +156,12 @@ const PauseDialog: React.FC<PauseDialogProps> = ({ open, onOpenChange, ticket, o
             />
           </div>
           <div className="space-y-2">
-            <Label>Comprovação (imagem/print) *</Label>
+            <Label>Comprovação (arquivo) *</Label>
             <div className="flex items-center gap-2">
               <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-md border border-input bg-background hover:bg-accent text-sm">
                 <Upload className="h-4 w-4" />
                 Anexar arquivo
-                <Input type="file" accept="image/*" multiple onChange={handleFileChange} className="hidden" />
+                <Input type="file" accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.csv,.zip,.txt,.rtf,.rar,.7z,.ppt,.pptx" multiple onChange={handleFileChange} className="hidden" />
               </label>
             </div>
             {files.length > 0 && (
