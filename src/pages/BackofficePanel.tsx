@@ -227,11 +227,28 @@ const AnalystPanel = () => {
   });
 
   const { data: teamMetaStats } = useQuery({
-    queryKey: ['backoffice-team-finished-meta'],
+    queryKey: ['backoffice-team-finished-meta', filterMonth],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_team_meta_stats');
-      if (error) throw error;
-      return data as { total: number; within_meta: number };
+      const threshold = 63360;
+      const all: { total_execution_seconds: number }[] = [];
+      let offset = 0;
+      while (true) {
+        let q = supabase
+          .from('tickets')
+          .select('total_execution_seconds')
+          .eq('status', 'finalizado');
+        if (monthDateRange) {
+          q = q.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+        }
+        const { data } = await q.range(offset, offset + 999);
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < 1000) break;
+        offset += 1000;
+      }
+      const total = all.length;
+      const within_meta = all.filter(t => (t.total_execution_seconds || 0) <= threshold).length;
+      return { total, within_meta } as { total: number; within_meta: number };
     },
     staleTime: 60_000,
   });
