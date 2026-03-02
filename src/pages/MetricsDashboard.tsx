@@ -1,20 +1,66 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { format, startOfMonth, endOfMonth, addDays, eachMonthOfInterval, subMonths } from 'date-fns';
+import { ptBR } from 'date-fns/locale/pt-BR';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
 import { Ticket, PRIORITY_LABELS, Profile, UserRole } from '@/types/tickets';
-import { ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, Users, TrendingUp, Calendar, Target } from 'lucide-react';
+import { ClipboardList, Clock, CheckCircle, PlayCircle, PauseCircle, Users, TrendingUp, Calendar, Target, CalendarIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const COLORS = ['hsl(270, 67%, 45%)', 'hsl(258, 68%, 74%)', 'hsl(142, 71%, 45%)', 'hsl(38, 92%, 50%)', 'hsl(0, 84%, 60%)'];
 const TICKET_COLUMNS = 'id, status, priority, type, assigned_analyst_id, requester_user_id, total_execution_seconds, total_paused_seconds, created_at, finished_at';
 
 const MetricsDashboard = () => {
   const queryClient = useQueryClient();
+  const [filterMonth, setFilterMonth] = useState(() => format(new Date(), 'yyyy-MM'));
+
+  // Dynamic month range from data
+  const { data: ticketDateRange } = useQuery({
+    queryKey: ['metrics-ticket-date-range'],
+    queryFn: async () => {
+      const [minRes, maxRes] = await Promise.all([
+        supabase.from('tickets').select('created_at').order('created_at', { ascending: true }).limit(1),
+        supabase.from('tickets').select('created_at').order('created_at', { ascending: false }).limit(1),
+      ]);
+      const minDate = minRes.data?.[0]?.created_at || null;
+      const maxDate = maxRes.data?.[0]?.created_at || null;
+      return { minDate, maxDate };
+    },
+    staleTime: 300_000,
+  });
+
+  const monthOptions = useMemo(() => {
+    const now = new Date();
+    if (!ticketDateRange?.minDate || !ticketDateRange?.maxDate) {
+      // fallback: last 12 months
+      return Array.from({ length: 12 }, (_, i) => {
+        const d = subMonths(now, i);
+        return { value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy', { locale: ptBR }) };
+      });
+    }
+    const minDate = new Date(ticketDateRange.minDate);
+    const maxDate = new Date(ticketDateRange.maxDate);
+    const end = maxDate > now ? maxDate : now;
+    const months = eachMonthOfInterval({ start: startOfMonth(minDate), end: startOfMonth(end) });
+    return months
+      .map(d => ({ value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy', { locale: ptBR }) }))
+      .reverse();
+  }, [ticketDateRange]);
+
+  // Calculate date range for filter
+  const monthDateRange = useMemo(() => {
+    if (filterMonth === 'all') return null;
+    const [y, m] = filterMonth.split('-').map(Number);
+    const start = new Date(y, m - 1, 1);
+    const end = addDays(endOfMonth(start), 1);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }, [filterMonth]);
 
   useEffect(() => {
     const channel = supabase
@@ -27,9 +73,13 @@ const MetricsDashboard = () => {
   }, [queryClient]);
 
   const { data: tickets = [] } = useQuery({
-    queryKey: ['metrics-tickets'],
+    queryKey: ['metrics-tickets', filterMonth],
     queryFn: async () => {
-      const { data } = await supabase.from('tickets').select(TICKET_COLUMNS).order('created_at', { ascending: false });
+      let query = supabase.from('tickets').select(TICKET_COLUMNS).order('created_at', { ascending: false });
+      if (monthDateRange) {
+        query = query.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+      }
+      const { data } = await query;
       return (data || []) as unknown as Ticket[];
     },
     staleTime: 120_000,
@@ -155,23 +205,17 @@ const MetricsDashboard = () => {
     tempoMedio: b.tempoMedio,
   }));
 
-  // --- Daily conclusion data (last 30 days) ---
-  const now = new Date();
-  const last30 = new Date();
-  last30.setDate(last30.getDate() - 30);
-
+  // --- Daily conclusion data (uses already-filtered tickets) ---
   const dailyCreatedMap = new Map<string, number>();
   const dailyFinishedMap = new Map<string, number>();
 
-  tickets
-    .filter(t => new Date(t.created_at) >= last30)
-    .forEach(t => {
-      const day = new Date(t.created_at).toLocaleDateString('pt-BR');
-      dailyCreatedMap.set(day, (dailyCreatedMap.get(day) || 0) + 1);
-    });
+  tickets.forEach(t => {
+    const day = new Date(t.created_at).toLocaleDateString('pt-BR');
+    dailyCreatedMap.set(day, (dailyCreatedMap.get(day) || 0) + 1);
+  });
 
   finishedTickets
-    .filter(t => t.finished_at && new Date(t.finished_at) >= last30)
+    .filter(t => t.finished_at)
     .forEach(t => {
       const day = new Date(t.finished_at!).toLocaleDateString('pt-BR');
       dailyFinishedMap.set(day, (dailyFinishedMap.get(day) || 0) + 1);
@@ -207,19 +251,17 @@ const MetricsDashboard = () => {
 
   const weeklyCreatedMap = new Map<string, { label: string; recebidos: number; concluidos: number }>();
 
-  tickets
-    .filter(t => new Date(t.created_at) >= last30)
-    .forEach(t => {
-      const d = new Date(t.created_at);
-      const key = getWeekSortKey(d);
-      const label = getWeekLabel(d);
-      const existing = weeklyCreatedMap.get(key) || { label, recebidos: 0, concluidos: 0 };
-      existing.recebidos++;
-      weeklyCreatedMap.set(key, existing);
-    });
+  tickets.forEach(t => {
+    const d = new Date(t.created_at);
+    const key = getWeekSortKey(d);
+    const label = getWeekLabel(d);
+    const existing = weeklyCreatedMap.get(key) || { label, recebidos: 0, concluidos: 0 };
+    existing.recebidos++;
+    weeklyCreatedMap.set(key, existing);
+  });
 
   finishedTickets
-    .filter(t => t.finished_at && new Date(t.finished_at) >= last30)
+    .filter(t => t.finished_at)
     .forEach(t => {
       const d = new Date(t.finished_at!);
       const key = getWeekSortKey(d);
@@ -235,13 +277,13 @@ const MetricsDashboard = () => {
   const dailyByBackoffice = backofficeProfiles.map(p => {
     const userTickets = tickets.filter(t => t.assigned_analyst_id === p.id);
     const dailyMap = new Map<string, { recebidos: number; concluidos: number }>();
-    userTickets.filter(t => new Date(t.created_at) >= last30).forEach(t => {
+    userTickets.forEach(t => {
       const day = new Date(t.created_at).toLocaleDateString('pt-BR');
       const e = dailyMap.get(day) || { recebidos: 0, concluidos: 0 };
       e.recebidos++;
       dailyMap.set(day, e);
     });
-    userTickets.filter(t => t.status === 'finalizado' && t.finished_at && new Date(t.finished_at) >= last30).forEach(t => {
+    userTickets.filter(t => t.status === 'finalizado' && t.finished_at).forEach(t => {
       const day = new Date(t.finished_at!).toLocaleDateString('pt-BR');
       const e = dailyMap.get(day) || { recebidos: 0, concluidos: 0 };
       e.concluidos++;
@@ -254,7 +296,7 @@ const MetricsDashboard = () => {
   const weeklyByBackoffice = backofficeProfiles.map(p => {
     const userTickets = tickets.filter(t => t.assigned_analyst_id === p.id);
     const wMap = new Map<string, { label: string; recebidos: number; concluidos: number }>();
-    userTickets.filter(t => new Date(t.created_at) >= last30).forEach(t => {
+    userTickets.forEach(t => {
       const d = new Date(t.created_at);
       const key = getWeekSortKey(d);
       const label = getWeekLabel(d);
@@ -262,7 +304,7 @@ const MetricsDashboard = () => {
       e.recebidos++;
       wMap.set(key, e);
     });
-    userTickets.filter(t => t.status === 'finalizado' && t.finished_at && new Date(t.finished_at) >= last30).forEach(t => {
+    userTickets.filter(t => t.status === 'finalizado' && t.finished_at).forEach(t => {
       const d = new Date(t.finished_at!);
       const key = getWeekSortKey(d);
       const label = getWeekLabel(d);
@@ -286,7 +328,25 @@ const MetricsDashboard = () => {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-foreground">Dashboard de Métricas</h1>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <h1 className="text-2xl font-bold text-foreground">Dashboard de Métricas</h1>
+          <div className="flex items-center gap-2">
+            <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+            <Select value={filterMonth} onValueChange={setFilterMonth}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Selecione o mês" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os meses</SelectItem>
+                {monthOptions.map(opt => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label.charAt(0).toUpperCase() + opt.label.slice(1)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
         {/* Ranking Backoffice - full width */}
         <Card>
@@ -423,7 +483,7 @@ const MetricsDashboard = () => {
 
               <TabsContent value="daily">
                 {dailyCombined.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">Sem dados nos últimos 30 dias</p>
+                  <p className="text-sm text-muted-foreground text-center py-8">Sem dados para o período selecionado</p>
                 ) : (
                   <div className="space-y-4">
                     <ResponsiveContainer width="100%" height={300}>
@@ -484,7 +544,7 @@ const MetricsDashboard = () => {
 
               <TabsContent value="weekly">
                 {weeklyData.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">Sem dados nos últimos 30 dias</p>
+                  <p className="text-sm text-muted-foreground text-center py-8">Sem dados para o período selecionado</p>
                 ) : (
                   <div className="space-y-4">
                     <ResponsiveContainer width="100%" height={300}>
