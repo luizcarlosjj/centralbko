@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal, Search, Target, PlayCircle, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal, Search, Target, PlayCircle, ArrowUpDown, ArrowUp, ArrowDown, Clock } from 'lucide-react';
 import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TicketStatus, PauseLog, Profile } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
@@ -187,6 +187,9 @@ const AnalystPanel = () => {
     return (t.total_execution_seconds || 0) <= FORTY_EIGHT_HOURS_BIZ;
   }).length;
   const myMeta48hRate = allMyFinished.length > 0 ? ((myFinishedWithin48h / allMyFinished.length) * 100).toFixed(1) : '0.0';
+  const myAvgTime = allMyFinished.length > 0
+    ? Math.round(allMyFinished.reduce((a, t) => a + (t.total_execution_seconds || 0), 0) / allMyFinished.length)
+    : 0;
 
   const teamFinishedWithin48h = teamMetaStats?.within_meta ?? 0;
   const teamFinishedTotal = teamMetaStats?.total ?? 0;
@@ -405,7 +408,7 @@ const AnalystPanel = () => {
         <h1 className="text-2xl font-bold text-foreground">Painel do Analista</h1>
 
         {/* Meta Card */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
           <Card className="border-success/30 bg-success/5">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-success">Meta Time</CardTitle>
@@ -425,7 +428,17 @@ const AnalystPanel = () => {
               <p className="text-3xl font-bold text-primary">{myMeta48hRate}%</p>
               <p className="text-[10px] text-muted-foreground mt-1">{myFinishedWithin48h}/{allMyFinished.length} concluídos em 2 dias úteis (17h36min)</p>
             </CardContent>
-          </Card>
+           </Card>
+           <Card>
+             <CardHeader className="flex flex-row items-center justify-between pb-2">
+               <CardTitle className="text-sm font-medium text-muted-foreground">Média Execução</CardTitle>
+               <Clock className="h-4 w-4 text-muted-foreground" />
+             </CardHeader>
+             <CardContent>
+               <p className="text-3xl font-bold">{formatTime(myAvgTime)}</p>
+               <p className="text-[10px] text-muted-foreground mt-1">média individual</p>
+             </CardContent>
+           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Em Aberto</CardTitle>
@@ -490,7 +503,7 @@ const AnalystPanel = () => {
                           <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
                           <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                           <TableCell><LiveTimer ticket={ticket} /></TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')} {new Date(ticket.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</TableCell>
                           <TableCell>
                             <div className="flex gap-1">
                               <Button size="sm" onClick={() => assumeTicket(ticket)}>
@@ -611,7 +624,7 @@ const AnalystPanel = () => {
                               )}
                             </TableCell>
                             <TableCell><LiveTimer ticket={ticket} /></TableCell>
-                            <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')} {new Date(ticket.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</TableCell>
                             <TableCell onClick={e => e.stopPropagation()}>
                               {ticket.status === 'em_andamento' && (
                                 <div className="flex gap-1">
