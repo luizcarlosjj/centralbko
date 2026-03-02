@@ -1,53 +1,31 @@
 
 
-## Controle Mensal de Chamados - Plano de Implementacao
+## Diagnostico do Problema
 
-### Objetivo
-Adicionar um filtro de mes/ano nos paineis do Supervisor e Backoffice que filtre tanto os cards de metricas quanto a listagem de chamados, sem alterar a logica existente.
+O seletor de mes gera apenas os **ultimos 12 meses a partir de hoje** (abril 2025 a marco 2026). Porem, existem chamados importados da planilha com datas futuras no campo `created_at` -- outubro, novembro e dezembro de 2026. Esses ~46 chamados nao aparecem em nenhuma opcao do seletor, mas aparecem quando "Todos os meses" esta selecionado (115 total).
 
-### Abordagem
+Dados observados nas requisicoes:
+- Chamados com `created_at` em `2026-10-02`, `2026-11-02`, `2026-12-02` (meses futuros)
+- Todos importados da planilha com datas que provavelmente estavam no formato dia/mes e foram interpretados como mes/dia
 
-Adicionar um **seletor de mes** (Select com opcoes de meses recentes + "Todos") no topo de cada painel, acima dos cards de metricas. Quando um mes e selecionado, todas as queries de dados passam a filtrar por `created_at` dentro do intervalo do mes escolhido.
+## Solucao Proposta
 
-### Mudancas por Arquivo
+Substituir a geracao estatica de 12 meses por uma geracao **dinamica baseada nos dados reais**. Consultar o min/max de `created_at` da tabela `tickets` e gerar opcoes de mes para todo o intervalo existente.
+
+### Mudancas
 
 **1. `src/pages/SupervisorPanel.tsx`**
-- Adicionar estado `filterMonth` (formato `"YYYY-MM"` ou `"all"`)
-- Adicionar um Select com os ultimos 12 meses + opcao "Todos os meses" no cabecalho, ao lado do titulo
-- Passar o filtro de mes para todas as queries:
-  - `supervisor-tickets` -- adicionar `.gte('created_at', monthStart).lt('created_at', monthEnd)`
-  - `supervisor-status-counts` -- aplicar mesmo filtro de mes nas 4 sub-queries de contagem
-  - `supervisor-all-finished` -- filtrar por `finished_at` no mes selecionado
-- Os cards de metricas (Total, Em Andamento, Pausado, Finalizados, Tempo Medio, Meta) passarao a refletir apenas o mes selecionado
-- Os filtros existentes (status, prioridade, tipo, analista, data de/ate) continuam funcionando normalmente em conjunto com o filtro mensal
+- Adicionar uma query leve para buscar o range de datas: `select min(created_at), max(created_at) from tickets` (via duas queries ordenadas com limit 1)
+- Substituir o loop `for (let i = 0; i < 12; i++)` por um loop que gera meses desde o mais antigo ate o mais recente (ou ate o mes atual, o que for maior)
+- Manter o valor padrao como mes atual
 
 **2. `src/pages/BackofficePanel.tsx`**
-- Mesma logica: estado `filterMonth` + Select no cabecalho
-- Aplicar filtro de mes nas queries:
-  - `analyst-open-tickets` -- filtrar por `created_at` no mes
-  - `analyst-finished-tickets` -- filtrar por `created_at` no mes
-  - `backoffice-unassigned-tickets` -- filtrar por `created_at` no mes
-  - `backoffice-all-finished-meta` -- filtrar por `created_at` no mes (para recalcular meta e media individual)
-- Os 5 cards de metricas (Meta Time, Meta Individual, Media Execucao, Em Aberto, Finalizados) refletirao o mes selecionado
-- A busca global e ordenacao continuam funcionando normalmente
+- Aplicar a mesma logica de geracao dinamica de meses
 
 ### Detalhes Tecnicos
 
-- O seletor gera uma lista dos ultimos 12 meses com `date-fns` (ja instalado): `format(subMonths(new Date(), i), 'yyyy-MM')` para value, e label como `format(subMonths(new Date(), i), 'MMMM yyyy', { locale: ptBR })`
-- Quando `filterMonth !== 'all'`, calcula-se `monthStart = startOfMonth(parse(...))` e `monthEnd = endOfMonth(parse(...))` e aplica `.gte('created_at', monthStart.toISOString()).lt('created_at', addDays(monthEnd, 1).toISOString())`
-- O `filterMonth` e incluido como dependencia nas queryKeys do React Query para invalidacao automatica
-- A RPC `get_team_meta_stats` do backoffice nao aceita parametro de mes -- para o Backoffice, o card "Meta Time" continuara mostrando o valor global (ou pode ser substituido por calculo local se necessario)
-- Valor padrao: mes atual pre-selecionado
-
-### UI
-
-O seletor de mes sera posicionado na mesma linha do titulo do painel, alinhado a direita, como um Select compacto com icone de calendario. Exemplo:
-
-```text
-| Painel do Supervisor          [Marco 2026 v] [Ver Metricas →] |
-|                                                                 |
-| [Total] [Em Andamento] [Pausa] [Finalizados] [Media] [Meta]    |
-```
-
-Nao ha necessidade de migracoes no banco de dados -- tudo e filtrado no frontend via queries existentes.
+- Query para range: duas chamadas `supabase.from('tickets').select('created_at').order('created_at', {ascending: true/false}).limit(1)` para obter min e max
+- Gerar meses com `eachMonthOfInterval({ start: minDate, end: maxDate })` do `date-fns`
+- Ordenar do mais recente ao mais antigo para manter a UX atual
+- Se nenhum ticket existir, fallback para os ultimos 12 meses
 
