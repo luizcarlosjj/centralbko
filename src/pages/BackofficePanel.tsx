@@ -18,6 +18,7 @@ import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
 import { calculateBusinessSeconds } from '@/lib/business-time';
+import AttachmentDialog from '@/components/AttachmentDialog';
 // Note: calculateBusinessSeconds still used for finalizeTicket/assumeTicket/assignTicket actions
 import { format, subMonths, startOfMonth, endOfMonth, addDays, parse, eachMonthOfInterval } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -692,21 +693,7 @@ const AnalystPanel = () => {
                             <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                             <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
                             <TableCell>
-                              {ticket.attachment_url ? (() => {
-                                let urls: string[] = [];
-                                try { urls = JSON.parse(ticket.attachment_url); } catch { urls = [ticket.attachment_url]; }
-                                return (
-                                  <div className="flex flex-col gap-1">
-                                    {urls.map((url, i) => (
-                                      <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline text-xs" onClick={e => e.stopPropagation()}>
-                                        <FileSpreadsheet className="h-3 w-3" /> Arquivo {urls.length > 1 ? i + 1 : ''}
-                                      </a>
-                                    ))}
-                                  </div>
-                                );
-                              })() : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
+                              <AttachmentDialog attachmentUrl={ticket.attachment_url} />
                             </TableCell>
                             <TableCell><LiveTimer ticket={ticket} /></TableCell>
                             <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')} {new Date(ticket.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</TableCell>
