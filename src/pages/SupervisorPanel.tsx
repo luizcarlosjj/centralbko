@@ -20,6 +20,9 @@ import LiveTimer from '@/components/LiveTimer';
 import { Link } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
 import { calculateBusinessSeconds } from '@/lib/business-time';
+import { format, subMonths, startOfMonth, endOfMonth, addDays, parse } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { Calendar as CalendarIcon } from 'lucide-react';
 
 const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, assigned_analyst_id, total_execution_seconds, total_paused_seconds, started_at, created_at, finished_at, pause_started_at, description';
 const PAGE_SIZE = 20;
@@ -55,6 +58,24 @@ const SupervisorPanel = () => {
   const [searchText, setSearchText] = useState('');
   const [sortColumn, setSortColumn] = useState<SortColumn>('created_at');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [filterMonth, setFilterMonth] = useState<string>(() => format(new Date(), 'yyyy-MM'));
+
+  const monthOptions = React.useMemo(() => {
+    const options = [];
+    for (let i = 0; i < 12; i++) {
+      const d = subMonths(new Date(), i);
+      options.push({ value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy', { locale: ptBR }) });
+    }
+    return options;
+  }, []);
+
+  const monthDateRange = React.useMemo(() => {
+    if (filterMonth === 'all') return null;
+    const parsed = parse(filterMonth, 'yyyy-MM', new Date());
+    const start = startOfMonth(parsed);
+    const end = addDays(endOfMonth(parsed), 1);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }, [filterMonth]);
 
   // Delete
   const [deleteTicketId, setDeleteTicketId] = useState<string | null>(null);
@@ -85,12 +106,15 @@ const SupervisorPanel = () => {
   });
 
   const { data: ticketData, isLoading: loading } = useQuery({
-    queryKey: ['supervisor-tickets', filterStatus, filterPriority, filterType, filterAnalyst, filterDateFrom, filterDateTo, page],
+    queryKey: ['supervisor-tickets', filterStatus, filterPriority, filterType, filterAnalyst, filterDateFrom, filterDateTo, page, filterMonth],
     queryFn: async () => {
       const from = page * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
       let query = supabase.from('tickets').select(TICKET_COLUMNS, { count: 'exact' });
 
+      if (monthDateRange) {
+        query = query.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+      }
       if (filterStatus !== 'all') query = query.eq('status', filterStatus);
       if (filterPriority !== 'all') query = query.eq('priority', filterPriority);
       if (filterType !== 'all') query = query.eq('type', filterType);
@@ -106,13 +130,17 @@ const SupervisorPanel = () => {
 
   // Separate query for global status counts
   const { data: statusCounts } = useQuery({
-    queryKey: ['supervisor-status-counts'],
+    queryKey: ['supervisor-status-counts', filterMonth],
     queryFn: async () => {
+      const applyMonth = (q: any) => {
+        if (monthDateRange) return q.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+        return q;
+      };
       const [inProgressRes, pausedRes, finishedRes, totalRes] = await Promise.all([
-        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'em_andamento'),
-        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'pausado'),
-        supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'finalizado'),
-        supabase.from('tickets').select('id', { count: 'exact', head: true }),
+        applyMonth(supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'em_andamento')),
+        applyMonth(supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'pausado')),
+        applyMonth(supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'finalizado')),
+        applyMonth(supabase.from('tickets').select('id', { count: 'exact', head: true })),
       ]);
       return {
         inProgress: inProgressRes.count || 0,
@@ -126,16 +154,19 @@ const SupervisorPanel = () => {
 
   // Global query for all finished tickets (for avg time and Meta)
   const { data: allFinishedTickets = [] } = useQuery({
-    queryKey: ['supervisor-all-finished'],
+    queryKey: ['supervisor-all-finished', filterMonth],
     queryFn: async () => {
       const all: any[] = [];
       let offset = 0;
       while (true) {
-        const { data } = await supabase
+        let q = supabase
           .from('tickets')
           .select('id, created_at, finished_at, total_execution_seconds')
-          .eq('status', 'finalizado')
-          .range(offset, offset + 999);
+          .eq('status', 'finalizado');
+        if (monthDateRange) {
+          q = q.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+        }
+        const { data } = await q.range(offset, offset + 999);
         if (!data || data.length === 0) break;
         all.push(...data);
         if (data.length < 1000) break;
@@ -363,11 +394,23 @@ const SupervisorPanel = () => {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <h1 className="text-2xl font-bold text-foreground">Painel do Supervisor</h1>
-          <Link to="/metrics">
-            <Button variant="outline" size="sm">Ver Métricas Completas →</Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+            <Select value={filterMonth} onValueChange={(v) => { setFilterMonth(v); setPage(0); }}>
+              <SelectTrigger className="h-8 w-[180px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os meses</SelectItem>
+                {monthOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Link to="/metrics">
+              <Button variant="outline" size="sm">Ver Métricas Completas →</Button>
+            </Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">

@@ -19,6 +19,9 @@ import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
 import { calculateBusinessSeconds } from '@/lib/business-time';
 // Note: calculateBusinessSeconds still used for finalizeTicket/assumeTicket/assignTicket actions
+import { format, subMonths, startOfMonth, endOfMonth, addDays, parse } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { Calendar as CalendarIcon } from 'lucide-react';
 
 const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, description';
 const PAGE_SIZE = 20;
@@ -64,6 +67,24 @@ const AnalystPanel = () => {
   const [openPage, setOpenPage] = useState(0);
   const [finishedPage, setFinishedPage] = useState(0);
   const [unassignedPage, setUnassignedPage] = useState(0);
+  const [filterMonth, setFilterMonth] = useState<string>(() => format(new Date(), 'yyyy-MM'));
+
+  const monthOptions = React.useMemo(() => {
+    const options = [];
+    for (let i = 0; i < 12; i++) {
+      const d = subMonths(new Date(), i);
+      options.push({ value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy', { locale: ptBR }) });
+    }
+    return options;
+  }, []);
+
+  const monthDateRange = React.useMemo(() => {
+    if (filterMonth === 'all') return null;
+    const parsed = parse(filterMonth, 'yyyy-MM', new Date());
+    const start = startOfMonth(parsed);
+    const end = addDays(endOfMonth(parsed), 1);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }, [filterMonth]);
 
   // Expanded rows
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -82,18 +103,20 @@ const AnalystPanel = () => {
   const getTypeLabel = (value: string) => ticketTypes.find(t => t.value === value)?.label || value;
 
   const { data: openData, isLoading: openLoading } = useQuery({
-    queryKey: ['analyst-open-tickets', user?.id, openPage],
+    queryKey: ['analyst-open-tickets', user?.id, openPage, filterMonth],
     queryFn: async () => {
       if (!user) return { tickets: [] as Ticket[], count: 0 };
       const from = openPage * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
-      const { data, count } = await supabase
+      let q = supabase
         .from('tickets')
         .select(TICKET_COLUMNS, { count: 'exact' })
         .eq('assigned_analyst_id', user.id)
-        .in('status', ['em_andamento', 'pausado'])
-        .order('created_at', { ascending: false })
-        .range(from, to);
+        .in('status', ['em_andamento', 'pausado']);
+      if (monthDateRange) {
+        q = q.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+      }
+      const { data, count } = await q.order('created_at', { ascending: false }).range(from, to);
       return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
     },
     enabled: !!user,
@@ -101,18 +124,20 @@ const AnalystPanel = () => {
   });
 
   const { data: finishedData, isLoading: finishedLoading } = useQuery({
-    queryKey: ['analyst-finished-tickets', user?.id, finishedPage],
+    queryKey: ['analyst-finished-tickets', user?.id, finishedPage, filterMonth],
     queryFn: async () => {
       if (!user) return { tickets: [] as Ticket[], count: 0 };
       const from = finishedPage * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
-      const { data, count } = await supabase
+      let q = supabase
         .from('tickets')
         .select(TICKET_COLUMNS, { count: 'exact' })
         .eq('assigned_analyst_id', user.id)
-        .eq('status', 'finalizado')
-        .order('finished_at', { ascending: false })
-        .range(from, to);
+        .eq('status', 'finalizado');
+      if (monthDateRange) {
+        q = q.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+      }
+      const { data, count } = await q.order('finished_at', { ascending: false }).range(from, to);
       return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
     },
     enabled: !!user,
@@ -120,17 +145,19 @@ const AnalystPanel = () => {
   });
 
   const { data: unassignedData, isLoading: unassignedLoading } = useQuery({
-    queryKey: ['backoffice-unassigned-tickets', unassignedPage],
+    queryKey: ['backoffice-unassigned-tickets', unassignedPage, filterMonth],
     queryFn: async () => {
       const from = unassignedPage * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
-      const { data, count } = await supabase
+      let q = supabase
         .from('tickets')
         .select(TICKET_COLUMNS, { count: 'exact' })
         .is('assigned_analyst_id', null)
-        .eq('status', 'nao_iniciado')
-        .order('created_at', { ascending: false })
-        .range(from, to);
+        .eq('status', 'nao_iniciado');
+      if (monthDateRange) {
+        q = q.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+      }
+      const { data, count } = await q.order('created_at', { ascending: false }).range(from, to);
       return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
     },
     staleTime: 30_000,
@@ -149,18 +176,21 @@ const AnalystPanel = () => {
   });
 
   const { data: allMyFinished = [] } = useQuery({
-    queryKey: ['backoffice-all-finished-meta', user?.id],
+    queryKey: ['backoffice-all-finished-meta', user?.id, filterMonth],
     queryFn: async () => {
       if (!user) return [];
       const all: any[] = [];
       let offset = 0;
       while (true) {
-        const { data } = await supabase
+        let q = supabase
           .from('tickets')
           .select('id, total_execution_seconds')
           .eq('assigned_analyst_id', user.id)
-          .eq('status', 'finalizado')
-          .range(offset, offset + 999);
+          .eq('status', 'finalizado');
+        if (monthDateRange) {
+          q = q.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+        }
+        const { data } = await q.range(offset, offset + 999);
         if (!data || data.length === 0) break;
         all.push(...data);
         if (data.length < 1000) break;
@@ -405,7 +435,21 @@ const AnalystPanel = () => {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-foreground">Painel do Analista</h1>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <h1 className="text-2xl font-bold text-foreground">Painel do Analista</h1>
+          <div className="flex items-center gap-2">
+            <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+            <Select value={filterMonth} onValueChange={setFilterMonth}>
+              <SelectTrigger className="h-8 w-[180px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os meses</SelectItem>
+                {monthOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
         {/* Meta Card */}
         <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
