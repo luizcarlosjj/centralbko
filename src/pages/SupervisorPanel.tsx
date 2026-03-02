@@ -20,7 +20,7 @@ import LiveTimer from '@/components/LiveTimer';
 import { Link } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
 import { calculateBusinessSeconds } from '@/lib/business-time';
-import { format, subMonths, startOfMonth, endOfMonth, addDays, parse } from 'date-fns';
+import { format, subMonths, startOfMonth, endOfMonth, addDays, parse, eachMonthOfInterval } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Calendar as CalendarIcon } from 'lucide-react';
 
@@ -60,14 +60,38 @@ const SupervisorPanel = () => {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [filterMonth, setFilterMonth] = useState<string>(() => format(new Date(), 'yyyy-MM'));
 
+  const { data: ticketDateRange } = useQuery({
+    queryKey: ['ticket-date-range'],
+    queryFn: async () => {
+      const [minRes, maxRes] = await Promise.all([
+        supabase.from('tickets').select('created_at').order('created_at', { ascending: true }).limit(1),
+        supabase.from('tickets').select('created_at').order('created_at', { ascending: false }).limit(1),
+      ]);
+      const minDate = minRes.data?.[0]?.created_at;
+      const maxDate = maxRes.data?.[0]?.created_at;
+      return { minDate, maxDate };
+    },
+    staleTime: 1000 * 60 * 10,
+  });
+
   const monthOptions = React.useMemo(() => {
-    const options = [];
-    for (let i = 0; i < 12; i++) {
-      const d = subMonths(new Date(), i);
-      options.push({ value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy', { locale: ptBR }) });
+    const now = new Date();
+    if (!ticketDateRange?.minDate || !ticketDateRange?.maxDate) {
+      const options = [];
+      for (let i = 0; i < 12; i++) {
+        const d = subMonths(now, i);
+        options.push({ value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy', { locale: ptBR }) });
+      }
+      return options;
     }
-    return options;
-  }, []);
+    const minDate = new Date(ticketDateRange.minDate);
+    const maxDate = new Date(ticketDateRange.maxDate);
+    const end = maxDate > now ? maxDate : now;
+    const months = eachMonthOfInterval({ start: minDate, end });
+    return months
+      .map(d => ({ value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy', { locale: ptBR }) }))
+      .reverse();
+  }, [ticketDateRange]);
 
   const monthDateRange = React.useMemo(() => {
     if (filterMonth === 'all') return null;
