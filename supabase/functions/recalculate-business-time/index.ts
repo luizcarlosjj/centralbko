@@ -72,6 +72,13 @@ function calculateBusinessSeconds(startUtc: Date, endUtc: Date): number {
   let totalSeconds = 0;
   const current = new Date(start);
   while (current < end) {
+    // Skip weekends
+    const dow = current.getDay();
+    if (dow === 0 || dow === 6) {
+      current.setDate(current.getDate() + (dow === 6 ? 2 : 1));
+      current.setHours(8, 0, 0, 0);
+      continue;
+    }
     if (isHoliday(current)) {
       current.setDate(current.getDate() + 1);
       current.setHours(8, 0, 0, 0);

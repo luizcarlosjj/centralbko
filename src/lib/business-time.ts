@@ -2,7 +2,7 @@
  * Business time calculator for Brazilian business hours.
  * 
  * Rules:
- * - Monday to Sunday: 08:00 - 18:00 (BRT / UTC-3)
+ * - Monday to Friday: 08:00 - 18:00 (BRT / UTC-3)
  * - Lunch break: 12:00 - 13:12
  * - Useful time per day: 8h48min = 31,680 seconds
  * - Excludes Brazilian national holidays
@@ -130,6 +130,14 @@ export function calculateBusinessSeconds(startUtc: Date, endUtc: Date): number {
   const current = new Date(start);
 
   while (current < end) {
+    // Skip weekends (0 = Sunday, 6 = Saturday)
+    const dow = current.getUTCDay();
+    if (dow === 0 || dow === 6) {
+      current.setUTCDate(current.getUTCDate() + (dow === 6 ? 2 : 1));
+      current.setUTCHours(WORK_START_HOUR, 0, 0, 0);
+      continue;
+    }
+
     // Skip holidays
     if (isHoliday(current)) {
       current.setUTCDate(current.getUTCDate() + 1);
