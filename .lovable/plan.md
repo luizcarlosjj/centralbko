@@ -1,31 +1,24 @@
 
 
-## Diagnostico do Problema
+## Filtro Mensal no Dashboard de Metricas
 
-O seletor de mes gera apenas os **ultimos 12 meses a partir de hoje** (abril 2025 a marco 2026). Porem, existem chamados importados da planilha com datas futuras no campo `created_at` -- outubro, novembro e dezembro de 2026. Esses ~46 chamados nao aparecem em nenhuma opcao do seletor, mas aparecem quando "Todos os meses" esta selecionado (115 total).
+### Abordagem
 
-Dados observados nas requisicoes:
-- Chamados com `created_at` em `2026-10-02`, `2026-11-02`, `2026-12-02` (meses futuros)
-- Todos importados da planilha com datas que provavelmente estavam no formato dia/mes e foram interpretados como mes/dia
+Aplicar o mesmo padrao ja usado no SupervisorPanel e BackofficePanel: adicionar um seletor de mes dinamico no topo da pagina que filtra todos os dados (cards, rankings, graficos) pelo mes selecionado. Mes atual como padrao.
 
-## Solucao Proposta
+### Mudancas em `src/pages/MetricsDashboard.tsx`
 
-Substituir a geracao estatica de 12 meses por uma geracao **dinamica baseada nos dados reais**. Consultar o min/max de `created_at` da tabela `tickets` e gerar opcoes de mes para todo o intervalo existente.
+1. **Imports**: Adicionar `format, parse, startOfMonth, endOfMonth, addDays, eachMonthOfInterval, subMonths` de `date-fns`, `ptBR` de `date-fns/locale/pt-BR`, `CalendarIcon` de `lucide-react`, e os componentes `Select/SelectTrigger/SelectValue/SelectContent/SelectItem`.
 
-### Mudancas
+2. **Query de range de datas**: Adicionar query `ticket-date-range` (mesmo padrao dos outros paineis) para buscar min/max `created_at` e gerar opcoes de meses dinamicamente.
 
-**1. `src/pages/SupervisorPanel.tsx`**
-- Adicionar uma query leve para buscar o range de datas: `select min(created_at), max(created_at) from tickets` (via duas queries ordenadas com limit 1)
-- Substituir o loop `for (let i = 0; i < 12; i++)` por um loop que gera meses desde o mais antigo ate o mais recente (ou ate o mes atual, o que for maior)
-- Manter o valor padrao como mes atual
+3. **Estado `filterMonth`**: Valor padrao `format(new Date(), 'yyyy-MM')`. Calcular `monthDateRange` com start/end ISO strings.
 
-**2. `src/pages/BackofficePanel.tsx`**
-- Aplicar a mesma logica de geracao dinamica de meses
+4. **Filtrar a query principal `metrics-tickets`**: Adicionar `filterMonth` na queryKey e aplicar `.gte('created_at', start).lt('created_at', end)` quando nao for `'all'`.
 
-### Detalhes Tecnicos
+5. **Adaptar graficos diarios/semanais**: Remover o filtro hardcoded de "ultimos 30 dias" (`last30`) e usar todos os tickets ja filtrados pela query (que ja vem filtrados pelo mes). Os graficos diarios e semanais mostrarao dados do mes selecionado em vez de sempre os ultimos 30 dias.
 
-- Query para range: duas chamadas `supabase.from('tickets').select('created_at').order('created_at', {ascending: true/false}).limit(1)` para obter min e max
-- Gerar meses com `eachMonthOfInterval({ start: minDate, end: maxDate })` do `date-fns`
-- Ordenar do mais recente ao mais antigo para manter a UX atual
-- Se nenhum ticket existir, fallback para os ultimos 12 meses
+6. **UI do seletor**: Posicionar ao lado do titulo "Dashboard de Metricas", alinhado a direita, com icone de calendario -- mesmo visual dos outros paineis.
+
+Nenhuma outra logica sera alterada -- rankings, calculos de meta, formatacao, tudo continua identico, apenas operando sobre o subconjunto filtrado pelo mes.
 
