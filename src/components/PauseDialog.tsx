@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { calculateBusinessSeconds } from '@/lib/business-time';
 import { useAuth } from '@/contexts/AuthContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -72,7 +73,7 @@ const PauseDialog: React.FC<PauseDialogProps> = ({ open, onOpenChange, ticket, o
       const lastActiveStart = ticket.started_at;
       let newExecSeconds = ticket.total_execution_seconds || 0;
       if (lastActiveStart) {
-        const elapsed = Math.floor((now.getTime() - new Date(lastActiveStart).getTime()) / 1000);
+        const elapsed = calculateBusinessSeconds(new Date(lastActiveStart), now);
         newExecSeconds += elapsed;
       }
 
