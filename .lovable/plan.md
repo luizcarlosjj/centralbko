@@ -1,32 +1,24 @@
 
 
-## Plano: Vincular Solicitantes a Usuários do Sistema
+## Filtro Mensal no Dashboard de Metricas
 
-### Problema Atual
-Chamados abertos pelo formulário público usam apenas `requester_name` (texto) e não têm `requester_user_id`. Por isso, o Analista não vê esses chamados no seu painel, pois o filtro usa `requester_user_id = user.id`.
+### Abordagem
 
-### Solução
+Aplicar o mesmo padrao ja usado no SupervisorPanel e BackofficePanel: adicionar um seletor de mes dinamico no topo da pagina que filtra todos os dados (cards, rankings, graficos) pelo mes selecionado. Mes atual como padrao.
 
-**1. Adicionar coluna `user_id` na tabela `requesters`**
-- Nova coluna opcional `user_id UUID` referenciando `auth.users(id)`
-- Permite associar um solicitante cadastrado a um usuário do sistema
+### Mudancas em `src/pages/MetricsDashboard.tsx`
 
-**2. Atualizar a tela de Gerenciar Solicitantes**
-- Adicionar um dropdown/select em cada linha da tabela para associar um usuário (perfil analista) ao solicitante
-- Carregar a lista de usuários com perfil `analyst` para popular o dropdown
-- Botão para salvar/remover a associação
+1. **Imports**: Adicionar `format, parse, startOfMonth, endOfMonth, addDays, eachMonthOfInterval, subMonths` de `date-fns`, `ptBR` de `date-fns/locale/pt-BR`, `CalendarIcon` de `lucide-react`, e os componentes `Select/SelectTrigger/SelectValue/SelectContent/SelectItem`.
 
-**3. Atualizar a Edge Function `create-public-ticket`**
-- Quando um chamado público for criado com um `requester_name` que corresponde a um solicitante vinculado a um usuário, preencher automaticamente o `requester_user_id` do ticket com o `user_id` do solicitante
+2. **Query de range de datas**: Adicionar query `ticket-date-range` (mesmo padrao dos outros paineis) para buscar min/max `created_at` e gerar opcoes de meses dinamicamente.
 
-**4. Resultado**
-- Chamados abertos sem login, ao selecionar um solicitante vinculado, aparecerão automaticamente no painel do Analista associado
-- O analista poderá ver o histórico, resolver pendências e interagir normalmente com esses chamados
+3. **Estado `filterMonth`**: Valor padrao `format(new Date(), 'yyyy-MM')`. Calcular `monthDateRange` com start/end ISO strings.
 
-### Detalhes Técnicos
+4. **Filtrar a query principal `metrics-tickets`**: Adicionar `filterMonth` na queryKey e aplicar `.gte('created_at', start).lt('created_at', end)` quando nao for `'all'`.
 
-- **Migration SQL**: `ALTER TABLE requesters ADD COLUMN user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;`
-- **RequesterManagement.tsx**: Adicionar coluna "Usuário Vinculado" com Select para escolher entre analistas disponíveis, com opção de desvincular
-- **create-public-ticket Edge Function**: Fazer lookup na tabela `requesters` pelo nome selecionado, buscar `user_id` se existir, e inserir no ticket como `requester_user_id`
-- Nenhuma alteração necessária no `AnalystPanel.tsx` pois ele já filtra por `requester_user_id`
+5. **Adaptar graficos diarios/semanais**: Remover o filtro hardcoded de "ultimos 30 dias" (`last30`) e usar todos os tickets ja filtrados pela query (que ja vem filtrados pelo mes). Os graficos diarios e semanais mostrarao dados do mes selecionado em vez de sempre os ultimos 30 dias.
+
+6. **UI do seletor**: Posicionar ao lado do titulo "Dashboard de Metricas", alinhado a direita, com icone de calendario -- mesmo visual dos outros paineis.
+
+Nenhuma outra logica sera alterada -- rankings, calculos de meta, formatacao, tudo continua identico, apenas operando sobre o subconjunto filtrado pelo mes.
 
