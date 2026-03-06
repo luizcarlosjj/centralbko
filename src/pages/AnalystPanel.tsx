@@ -172,6 +172,7 @@ const AnalystPanel = () => {
   }, [pendingData?.tickets]);
 
   const invalidateAll = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['analyst-not-started'] });
     queryClient.invalidateQueries({ queryKey: ['analyst-in-progress'] });
     queryClient.invalidateQueries({ queryKey: ['analyst-finished'] });
     queryClient.invalidateQueries({ queryKey: ['analyst-pending'] });
@@ -189,6 +190,7 @@ const AnalystPanel = () => {
     return () => { supabase.removeChannel(channel); };
   }, [invalidateAll]);
 
+  const notStartedTickets = notStartedData?.tickets || [];
   const inProgressTickets = inProgressData?.tickets || [];
   const finishedTickets = finishedData?.tickets || [];
   const pendingTickets = pendingData?.tickets || [];
@@ -271,8 +273,12 @@ const AnalystPanel = () => {
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-foreground">Meus Chamados</h1>
 
-        <Tabs defaultValue="in_progress" className="w-full">
+        <Tabs defaultValue="not_started" className="w-full">
           <TabsList>
+            <TabsTrigger value="not_started">
+              Não Iniciados ({notStartedTickets.length})
+              {notStartedTickets.length > 0 && <span className="ml-1 inline-flex h-2 w-2 rounded-full bg-info animate-pulse" />}
+            </TabsTrigger>
             <TabsTrigger value="in_progress">Em Tratamento ({inProgressTickets.length})</TabsTrigger>
             <TabsTrigger value="pending">
               Pendentes ({pendingTickets.length})
@@ -280,6 +286,51 @@ const AnalystPanel = () => {
             </TabsTrigger>
             <TabsTrigger value="finished">Finalizados ({finishedTickets.length})</TabsTrigger>
           </TabsList>
+
+          {/* Não Iniciados */}
+          <TabsContent value="not_started">
+            <Card>
+              <CardContent className="pt-6">
+                {notStartedTickets.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-8 text-center">Nenhum chamado aguardando início</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead></TableHead>
+                        <TableHead>ID</TableHead>
+                        <TableHead>Base</TableHead>
+                        <TableHead>Prioridade</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Responsável</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Data</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {notStartedTickets.map(ticket => (
+                        <React.Fragment key={ticket.id}>
+                          <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
+                            <TableCell>
+                              {expandedRows.has(ticket.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
+                            <TableCell>{ticket.base_name}</TableCell>
+                            <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                            <TableCell>{getTypeLabel(ticket.type)}</TableCell>
+                            <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
+                            <TableCell><Badge variant="outline" className="bg-muted/50 text-muted-foreground">Não Iniciado</Badge></TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                          </TableRow>
+                          {renderExpandedDetails(ticket, 8)}
+                        </React.Fragment>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           {/* Em Tratamento */}
           <TabsContent value="in_progress">
