@@ -67,6 +67,23 @@ const AnalystPanel = () => {
     return profiles.find(p => p.id === id)?.name || id.slice(0, 8);
   };
 
+  // Não Iniciados
+  const { data: notStartedData } = useQuery({
+    queryKey: ['analyst-not-started', user?.id],
+    queryFn: async () => {
+      if (!user) return { tickets: [] as Ticket[], count: 0 };
+      const { data, count } = await supabase
+        .from('tickets')
+        .select(TICKET_COLUMNS, { count: 'exact' })
+        .eq('requester_user_id', user.id)
+        .eq('status', 'nao_iniciado')
+        .order('created_at', { ascending: false });
+      return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
+    },
+    enabled: !!user,
+    staleTime: 30_000,
+  });
+
   // Em Tratamento
   const { data: inProgressData } = useQuery({
     queryKey: ['analyst-in-progress', user?.id],
