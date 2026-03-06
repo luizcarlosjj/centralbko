@@ -48,6 +48,18 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Lookup requester to find linked user_id
+    let requesterUserId: string | null = null;
+    const { data: requesterData } = await supabase
+      .from("requesters")
+      .select("user_id")
+      .eq("name", requester_name)
+      .eq("active", true)
+      .maybeSingle();
+    if (requesterData?.user_id) {
+      requesterUserId = requesterData.user_id;
+    }
+
     const ticketId = crypto.randomUUID();
     const uploadedUrls: string[] = [];
     const ALLOWED_EXTS = ['xlsx', 'xls', 'csv', 'pdf', 'zip', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'rtf', 'odt', 'ods', 'odp', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tiff', 'tif', 'rar', '7z'];
@@ -61,7 +73,6 @@ Deno.serve(async (req) => {
         
         const ext = file.name.split(".").pop()?.toLowerCase() || '';
         
-        // Security: validate extension
         if (!ALLOWED_EXTS.includes(ext)) {
           return new Response(
             JSON.stringify({ error: `Extensão não permitida: .${ext}` }),
@@ -69,7 +80,6 @@ Deno.serve(async (req) => {
           );
         }
         
-        // Security: check for dangerous patterns in filename
         const nameLower = file.name.toLowerCase();
         if (DANGEROUS_EXTS.some((d: string) => nameLower.includes('.' + d))) {
           return new Response(
@@ -78,7 +88,6 @@ Deno.serve(async (req) => {
           );
         }
         
-        // Security: validate file size from base64
         const fileSize = (file.base64.length * 3) / 4;
         if (fileSize > MAX_FILE_SIZE) {
           return new Response(
@@ -142,7 +151,7 @@ Deno.serve(async (req) => {
         id: ticketId,
         base_name,
         requester_name,
-        requester_user_id: null,
+        requester_user_id: requesterUserId,
         priority,
         type,
         setup_level: setup_level || null,
