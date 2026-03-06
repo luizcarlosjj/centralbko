@@ -79,16 +79,32 @@ const RequesterManagement = () => {
   };
 
   const linkUser = async (requesterId: string, userId: string | null) => {
+    // Find the requester name for backfilling tickets
+    const requester = requesters.find(r => r.id === requesterId);
+    
     const { error } = await supabase
       .from('requesters')
       .update({ user_id: userId } as any)
       .eq('id', requesterId);
     if (error) {
       toast({ title: 'Erro', description: error.message, variant: 'destructive' });
-    } else {
-      toast({ title: userId ? 'Usuário vinculado!' : 'Usuário desvinculado!' });
-      queryClient.invalidateQueries({ queryKey: ['requesters-management'] });
+      return;
     }
+
+    // Backfill existing tickets: update requester_user_id for all tickets with this requester_name
+    if (requester) {
+      const { error: ticketError } = await supabase
+        .from('tickets')
+        .update({ requester_user_id: userId })
+        .eq('requester_name', requester.name);
+      if (ticketError) {
+        console.error('Erro ao atualizar tickets existentes:', ticketError);
+        toast({ title: 'Aviso', description: 'Vínculo salvo, mas não foi possível atualizar os chamados existentes: ' + ticketError.message, variant: 'destructive' });
+      }
+    }
+
+    toast({ title: userId ? 'Usuário vinculado e chamados atualizados!' : 'Usuário desvinculado e chamados atualizados!' });
+    queryClient.invalidateQueries({ queryKey: ['requesters-management'] });
   };
 
   return (
