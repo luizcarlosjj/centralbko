@@ -861,6 +861,7 @@ const AnalystPanel = () => {
                         <SortableHead col="requester_name">Solicitante</SortableHead>
                         <SortableHead col="priority">Prioridade</SortableHead>
                         <TableHead>Tipo</TableHead>
+                        <TableHead>Anexo</TableHead>
                         <SortableHead col="total_execution_seconds">Execução</SortableHead>
                         <TableHead>Pausado</TableHead>
                         <SortableHead col="created_at">Finalizado</SortableHead>
@@ -878,6 +879,9 @@ const AnalystPanel = () => {
                             <TableCell>{ticket.requester_name}</TableCell>
                             <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
                             <TableCell>{getTypeLabel(ticket.type)}</TableCell>
+                            <TableCell>
+                              <AttachmentDialog attachmentUrl={ticket.attachment_url} />
+                            </TableCell>
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</TableCell>
                             <TableCell className="font-mono text-xs">{formatTime(ticket.total_paused_seconds || 0)}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">
