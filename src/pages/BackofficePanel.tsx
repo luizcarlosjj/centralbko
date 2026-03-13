@@ -115,6 +115,7 @@ const AnalystPanel = () => {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [pauseLogs, setPauseLogs] = useState<Record<string, PauseLog[]>>({});
   const [pauseReasonNames, setPauseReasonNames] = useState<Record<string, string>>({});
+  const [pauseResponses, setPauseResponses] = useState<Record<string, { id: string; pause_log_id: string; description_text: string; responder_name: string; created_at: string; files: { id: string; file_url: string }[] }[]>>({});
 
   const { data: ticketTypes = [] } = useQuery({
     queryKey: ['backoffice-ticket-types'],
