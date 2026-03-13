@@ -36,6 +36,7 @@ const AnalystPanel = () => {
   const queryClient = useQueryClient();
   const [pendencyTicket, setPendencyTicket] = useState<Ticket | null>(null);
   const [activePauseLog, setActivePauseLog] = useState<PauseLog | null>(null);
+  const [editTicket, setEditTicket] = useState<Ticket | null>(null);
 
   // Expanded rows
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
