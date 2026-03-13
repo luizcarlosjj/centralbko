@@ -38,6 +38,8 @@ const getFileName = (url: string) => {
     return decoded.replace(/^[0-9a-f]{8,}-/, '').replace(/^\d+-/, '');
   } catch { return 'Arquivo'; }
 };
+
+const priorityColor: Record<string, string> = {
   baixa: 'bg-info/10 text-info border-info/20',
   media: 'bg-warning/10 text-warning border-warning/20',
   alta: 'bg-destructive/10 text-destructive border-destructive/20',
