@@ -8,10 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronDown, ChevronUp, FileSpreadsheet, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileSpreadsheet, AlertCircle, Image as ImageIcon, Pencil } from 'lucide-react';
 import { Ticket, PRIORITY_LABELS, STATUS_LABELS, Profile, PauseLog } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
 import ResolvePendencyDialog from '@/components/ResolvePendencyDialog';
+import EditTicketDialog from '@/components/EditTicketDialog';
 
 const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, requester_user_id, description';
 
@@ -35,6 +36,7 @@ const AnalystPanel = () => {
   const queryClient = useQueryClient();
   const [pendencyTicket, setPendencyTicket] = useState<Ticket | null>(null);
   const [activePauseLog, setActivePauseLog] = useState<PauseLog | null>(null);
+  const [editTicket, setEditTicket] = useState<Ticket | null>(null);
 
   // Expanded rows
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -305,6 +307,7 @@ const AnalystPanel = () => {
                         <TableHead>Responsável</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Data</TableHead>
+                        <TableHead>Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -321,8 +324,13 @@ const AnalystPanel = () => {
                             <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
                             <TableCell><Badge variant="outline" className="bg-muted/50 text-muted-foreground">Não Iniciado</Badge></TableCell>
                             <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                            <TableCell onClick={e => e.stopPropagation()}>
+                              <Button size="sm" variant="outline" onClick={() => setEditTicket(ticket)}>
+                                <Pencil className="mr-1 h-3 w-3" /> Editar
+                              </Button>
+                            </TableCell>
                           </TableRow>
-                          {renderExpandedDetails(ticket, 8)}
+                          {renderExpandedDetails(ticket, 9)}
                         </React.Fragment>
                       ))}
                     </TableBody>
@@ -515,6 +523,15 @@ const AnalystPanel = () => {
           ticket={pendencyTicket}
           pauseLog={activePauseLog}
           onResolved={invalidateAll}
+        />
+      )}
+
+      {editTicket && (
+        <EditTicketDialog
+          open={!!editTicket}
+          onOpenChange={(open) => { if (!open) setEditTicket(null); }}
+          ticket={editTicket}
+          onSaved={invalidateAll}
         />
       )}
     </AppLayout>
