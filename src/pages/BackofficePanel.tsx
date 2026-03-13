@@ -312,6 +312,44 @@ const AnalystPanel = () => {
               setPauseReasonNames(prev => ({ ...prev, ...Object.fromEntries(reasons.map(r => [r.id, r.title])) }));
             }
           }
+
+          // Fetch pause responses for this ticket's logs
+          const logIds = logs.map(l => l.id);
+          if (logIds.length > 0) {
+            const { data: responses } = await supabase
+              .from('pause_responses')
+              .select('id, pause_log_id, description_text, responded_by, created_at')
+              .in('pause_log_id', logIds)
+              .order('created_at', { ascending: true });
+
+            if (responses && responses.length > 0) {
+              // Fetch response files
+              const responseIds = responses.map(r => r.id);
+              const { data: files } = await supabase
+                .from('pause_response_files')
+                .select('id, pause_response_id, file_url')
+                .in('pause_response_id', responseIds);
+
+              // Fetch responder names
+              const responderIds = [...new Set(responses.map(r => r.responded_by))];
+              const { data: profiles } = await supabase
+                .from('profiles')
+                .select('id, name')
+                .in('id', responderIds);
+              const profileMap = Object.fromEntries((profiles || []).map(p => [p.id, p.name]));
+
+              const enriched = responses.map(r => ({
+                id: r.id,
+                pause_log_id: r.pause_log_id,
+                description_text: r.description_text,
+                responder_name: profileMap[r.responded_by] || 'Desconhecido',
+                created_at: r.created_at,
+                files: (files || []).filter(f => f.pause_response_id === r.id).map(f => ({ id: f.id, file_url: f.file_url })),
+              }));
+
+              setPauseResponses(prev => ({ ...prev, [ticketId]: enriched }));
+            }
+          }
         }
       }
     }
