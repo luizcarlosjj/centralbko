@@ -897,19 +897,58 @@ const AnalystPanel = () => {
                                 {(pauseLogs[ticket.id] || []).length === 0 ? (
                                   <p className="text-xs text-muted-foreground">Nenhuma pausa registrada</p>
                                 ) : (
-                                  <div className="space-y-2">
-                                    {(pauseLogs[ticket.id] || []).map(log => (
-                                      <div key={log.id} className="text-xs border rounded p-2 bg-background">
-                                        <div className="flex justify-between">
-                                          <span>Início: {new Date(log.pause_started_at).toLocaleString('pt-BR')}</span>
-                                          <span>Duração: {log.pause_ended_at ? formatTime(log.paused_seconds) : 'Em andamento'}</span>
+                                  <div className="space-y-3">
+                                    {(pauseLogs[ticket.id] || []).map(log => {
+                                      const logResponses = (pauseResponses[ticket.id] || []).filter(r => r.pause_log_id === log.id);
+                                      return (
+                                        <div key={log.id} className="text-xs border rounded p-3 bg-background space-y-2">
+                                          <div className="flex justify-between">
+                                            <span>Início: {new Date(log.pause_started_at).toLocaleString('pt-BR')}</span>
+                                            <span>Duração: {log.pause_ended_at ? formatTime(log.paused_seconds) : 'Em andamento'}</span>
+                                          </div>
+                                          {pauseReasonNames[log.pause_reason_id] && (
+                                            <p><span className="text-muted-foreground">Motivo:</span> <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 text-xs">{pauseReasonNames[log.pause_reason_id]}</Badge></p>
+                                          )}
+                                          {log.description_text && <p className="text-muted-foreground">{log.description_text}</p>}
+
+                                          {logResponses.length > 0 && (
+                                            <div className="mt-2 space-y-2 border-t border-border pt-2">
+                                              <div className="flex items-center gap-1.5 text-xs font-medium text-primary">
+                                                <MessageSquare className="h-3.5 w-3.5" />
+                                                <span>Resposta do Solicitante</span>
+                                              </div>
+                                              {logResponses.map(resp => (
+                                                <div key={resp.id} className="rounded-md border border-primary/20 bg-primary/5 p-2.5 space-y-1.5">
+                                                  <div className="flex items-center justify-between">
+                                                    <span className="font-medium text-foreground">{resp.responder_name}</span>
+                                                    <span className="text-[10px] text-muted-foreground">{new Date(resp.created_at).toLocaleString('pt-BR')}</span>
+                                                  </div>
+                                                  <p className="text-foreground">{resp.description_text}</p>
+                                                  {resp.files.length > 0 && (
+                                                    <div className="space-y-1 pt-1">
+                                                      {resp.files.map(f => (
+                                                        <a key={f.id} href={f.file_url} target="_blank" rel="noopener noreferrer"
+                                                          className="flex items-center gap-2 p-1.5 rounded border border-border bg-background hover:bg-muted/50 transition-colors group">
+                                                          {isImageUrl(f.file_url) ? (
+                                                            <img src={f.file_url} alt="Evidência" className="h-8 w-8 rounded object-cover shrink-0" loading="lazy" />
+                                                          ) : (
+                                                            <div className="h-8 w-8 rounded bg-muted flex items-center justify-center shrink-0">
+                                                              <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                                                            </div>
+                                                          )}
+                                                          <span className="truncate flex-1">{getFileName(f.file_url)}</span>
+                                                          <Download className="h-3 w-3 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+                                                        </a>
+                                                      ))}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
                                         </div>
-                                        {pauseReasonNames[log.pause_reason_id] && (
-                                          <p className="mt-1"><span className="text-muted-foreground">Motivo:</span> <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 text-xs">{pauseReasonNames[log.pause_reason_id]}</Badge></p>
-                                        )}
-                                        {log.description_text && <p className="mt-1 text-muted-foreground">{log.description_text}</p>}
-                                      </div>
-                                    ))}
+                                      );
+                                    })}
                                   </div>
                                 )}
                               </TableCell>
