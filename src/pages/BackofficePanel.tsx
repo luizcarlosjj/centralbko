@@ -890,7 +890,7 @@ const AnalystPanel = () => {
                           </TableRow>
                           {expandedRows.has(ticket.id) && (
                             <TableRow>
-                              <TableCell colSpan={9} className="bg-muted/30 p-4">
+                              <TableCell colSpan={10} className="bg-muted/30 p-4">
                                 {ticket.description && (
                                   <div className="mb-3">
                                     <p className="text-sm font-medium mb-1">Descrição</p>
