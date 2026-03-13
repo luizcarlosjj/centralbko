@@ -8,10 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronDown, ChevronUp, FileSpreadsheet, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileSpreadsheet, AlertCircle, Image as ImageIcon, Pencil } from 'lucide-react';
 import { Ticket, PRIORITY_LABELS, STATUS_LABELS, Profile, PauseLog } from '@/types/tickets';
 import LiveTimer from '@/components/LiveTimer';
 import ResolvePendencyDialog from '@/components/ResolvePendencyDialog';
+import EditTicketDialog from '@/components/EditTicketDialog';
 
 const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, requester_user_id, description';
 
