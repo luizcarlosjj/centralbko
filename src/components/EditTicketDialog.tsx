@@ -44,8 +44,8 @@ function getFileName(url: string): string {
 
 const EditTicketDialog: React.FC<EditTicketDialogProps> = ({ open, onOpenChange, ticket, onSaved }) => {
   const [baseName, setBaseName] = useState(ticket.base_name);
-  const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
-  const [type, setType] = useState(ticket.type);
+  const [priority, setPriority] = useState<string>(ticket.priority);
+  const [type, setType] = useState<string>(ticket.type);
   const [description, setDescription] = useState(ticket.description);
   const [existingUrls, setExistingUrls] = useState<string[]>(parseExistingUrls(ticket.attachment_url));
   const [newFiles, setNewFiles] = useState<File[]>([]);
