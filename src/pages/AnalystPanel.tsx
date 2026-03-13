@@ -307,6 +307,7 @@ const AnalystPanel = () => {
                         <TableHead>Responsável</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Data</TableHead>
+                        <TableHead>Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -323,8 +324,13 @@ const AnalystPanel = () => {
                             <TableCell className="text-sm">{getProfileName(ticket.assigned_analyst_id)}</TableCell>
                             <TableCell><Badge variant="outline" className="bg-muted/50 text-muted-foreground">Não Iniciado</Badge></TableCell>
                             <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                            <TableCell onClick={e => e.stopPropagation()}>
+                              <Button size="sm" variant="outline" onClick={() => setEditTicket(ticket)}>
+                                <Pencil className="mr-1 h-3 w-3" /> Editar
+                              </Button>
+                            </TableCell>
                           </TableRow>
-                          {renderExpandedDetails(ticket, 8)}
+                          {renderExpandedDetails(ticket, 9)}
                         </React.Fragment>
                       ))}
                     </TableBody>
