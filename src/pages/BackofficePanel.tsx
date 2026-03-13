@@ -27,7 +27,17 @@ import { Calendar as CalendarIcon } from 'lucide-react';
 const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, description';
 const PAGE_SIZE = 20;
 
-const priorityColor: Record<string, string> = {
+const isImageUrl = (url: string) => {
+  const ext = url.split('.').pop()?.toLowerCase().split('?')[0] || '';
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext);
+};
+
+const getFileName = (url: string) => {
+  try {
+    const decoded = decodeURIComponent(url.split('/').pop() || 'Arquivo');
+    return decoded.replace(/^[0-9a-f]{8,}-/, '').replace(/^\d+-/, '');
+  } catch { return 'Arquivo'; }
+};
   baixa: 'bg-info/10 text-info border-info/20',
   media: 'bg-warning/10 text-warning border-warning/20',
   alta: 'bg-destructive/10 text-destructive border-destructive/20',
