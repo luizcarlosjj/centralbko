@@ -525,6 +525,15 @@ const AnalystPanel = () => {
           onResolved={invalidateAll}
         />
       )}
+
+      {editTicket && (
+        <EditTicketDialog
+          open={!!editTicket}
+          onOpenChange={(open) => { if (!open) setEditTicket(null); }}
+          ticket={editTicket}
+          onSaved={invalidateAll}
+        />
+      )}
     </AppLayout>
   );
 };
