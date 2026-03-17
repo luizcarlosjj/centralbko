@@ -61,6 +61,7 @@ const AnalystPanel = () => {
   const queryClient = useQueryClient();
   const [pauseDialogTicket, setPauseDialogTicket] = useState<Ticket | null>(null);
   const [assignDialogTicket, setAssignDialogTicket] = useState<Ticket | null>(null);
+  const [finalizeDialogTicket, setFinalizeDialogTicket] = useState<Ticket | null>(null);
   const [selectedBackoffice, setSelectedBackoffice] = useState('');
 
   // Filters
