@@ -981,6 +981,15 @@ const AnalystPanel = () => {
         />
       )}
 
+      {finalizeDialogTicket && (
+        <FinalizeTicketDialog
+          open={!!finalizeDialogTicket}
+          onOpenChange={(open) => { if (!open) setFinalizeDialogTicket(null); }}
+          ticket={finalizeDialogTicket}
+          onFinalized={invalidateTickets}
+        />
+      )}
+
       <Dialog open={!!assignDialogTicket} onOpenChange={(open) => { if (!open) setAssignDialogTicket(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
