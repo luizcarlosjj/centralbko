@@ -756,9 +756,9 @@ const AnalystPanel = () => {
                                   <Button size="sm" variant="outline" onClick={() => setPauseDialogTicket(ticket)}>
                                     <Pause className="mr-1 h-3 w-3" /> Pausar
                                   </Button>
-                                  <Button size="sm" onClick={() => finalizeTicket(ticket)}>
-                                    <CheckCircle className="mr-1 h-3 w-3" /> Finalizar
-                                  </Button>
+                                   <Button size="sm" onClick={() => setFinalizeDialogTicket(ticket)}>
+                                     <CheckCircle className="mr-1 h-3 w-3" /> Finalizar
+                                   </Button>
                                 </div>
                               )}
                               {ticket.status === 'pausado' && (
