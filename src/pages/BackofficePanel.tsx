@@ -19,6 +19,7 @@ import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
 import { calculateBusinessSeconds } from '@/lib/business-time';
 import AttachmentDialog from '@/components/AttachmentDialog';
+import FinalizeTicketDialog from '@/components/FinalizeTicketDialog';
 // Note: calculateBusinessSeconds still used for finalizeTicket/assumeTicket/assignTicket actions
 import { format, subMonths, startOfMonth, endOfMonth, addDays, parse, eachMonthOfInterval } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -60,6 +61,7 @@ const AnalystPanel = () => {
   const queryClient = useQueryClient();
   const [pauseDialogTicket, setPauseDialogTicket] = useState<Ticket | null>(null);
   const [assignDialogTicket, setAssignDialogTicket] = useState<Ticket | null>(null);
+  const [finalizeDialogTicket, setFinalizeDialogTicket] = useState<Ticket | null>(null);
   const [selectedBackoffice, setSelectedBackoffice] = useState('');
 
   // Filters
@@ -754,9 +756,9 @@ const AnalystPanel = () => {
                                   <Button size="sm" variant="outline" onClick={() => setPauseDialogTicket(ticket)}>
                                     <Pause className="mr-1 h-3 w-3" /> Pausar
                                   </Button>
-                                  <Button size="sm" onClick={() => finalizeTicket(ticket)}>
-                                    <CheckCircle className="mr-1 h-3 w-3" /> Finalizar
-                                  </Button>
+                                   <Button size="sm" onClick={() => setFinalizeDialogTicket(ticket)}>
+                                     <CheckCircle className="mr-1 h-3 w-3" /> Finalizar
+                                   </Button>
                                 </div>
                               )}
                               {ticket.status === 'pausado' && (
@@ -976,6 +978,15 @@ const AnalystPanel = () => {
           onOpenChange={(open) => { if (!open) setPauseDialogTicket(null); }}
           ticket={pauseDialogTicket}
           onPaused={invalidateTickets}
+        />
+      )}
+
+      {finalizeDialogTicket && (
+        <FinalizeTicketDialog
+          open={!!finalizeDialogTicket}
+          onOpenChange={(open) => { if (!open) setFinalizeDialogTicket(null); }}
+          ticket={finalizeDialogTicket}
+          onFinalized={invalidateTickets}
         />
       )}
 
