@@ -19,6 +19,7 @@ import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
 import { calculateBusinessSeconds } from '@/lib/business-time';
 import AttachmentDialog from '@/components/AttachmentDialog';
+import FinalizeTicketDialog from '@/components/FinalizeTicketDialog';
 // Note: calculateBusinessSeconds still used for finalizeTicket/assumeTicket/assignTicket actions
 import { format, subMonths, startOfMonth, endOfMonth, addDays, parse, eachMonthOfInterval } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
