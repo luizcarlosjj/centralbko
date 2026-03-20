@@ -125,6 +125,7 @@ const NewTicket = () => {
       requester_name: profile.name,
       requester_user_id: user.id,
       priority,
+      complexity,
       type,
       setup_level: setupLevel,
       team,
