@@ -153,6 +153,7 @@ Deno.serve(async (req) => {
         requester_name,
         requester_user_id: requesterUserId,
         priority,
+        complexity: complexity || null,
         type,
         setup_level: setup_level || null,
         team: team || null,
