@@ -164,6 +164,7 @@ const PublicTicketForm = () => {
         base_name: baseName,
         requester_name: requesterName,
         priority,
+        complexity,
         type,
         setup_level: setupLevel,
         team,
