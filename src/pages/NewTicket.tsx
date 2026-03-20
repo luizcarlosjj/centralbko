@@ -96,7 +96,7 @@ const NewTicket = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!priority || !type || !setupLevel || !team || !user || !profile || attachments.length === 0) return;
+    if (!priority || !type || !setupLevel || !team || !complexity || !user || !profile || attachments.length === 0) return;
     setSubmitting(true);
 
     const id = crypto.randomUUID();
