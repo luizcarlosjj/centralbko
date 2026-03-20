@@ -23,6 +23,7 @@ const PublicTicketForm = () => {
   const [baseName, setBaseName] = useState('');
   const [requesterName, setRequesterName] = useState('');
   const [priority, setPriority] = useState<TicketPriority | ''>('');
+  const [complexity, setComplexity] = useState<TicketComplexity | ''>('');
   const [type, setType] = useState('');
   const [setupLevel, setSetupLevel] = useState('');
   const [team, setTeam] = useState('');
