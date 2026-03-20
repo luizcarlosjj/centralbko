@@ -250,7 +250,7 @@ const NewTicket = () => {
                 {fileError && <p className="text-sm text-destructive">{fileError}</p>}
                 <p className="text-xs text-muted-foreground">{attachments.length}/{MAX_FILES} arquivos</p>
               </div>
-              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || !setupLevel || !team || attachments.length === 0}>
+              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || !setupLevel || !team || !complexity || attachments.length === 0}>
                 <Send className="mr-2 h-4 w-4" />
                 {submitting ? 'Enviando...' : 'Enviar Chamado'}
               </Button>
