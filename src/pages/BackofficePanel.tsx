@@ -217,6 +217,35 @@ const AnalystPanel = () => {
     staleTime: 120_000,
   });
 
+  const otherBackofficeUsers = backofficeUsers.filter(u => u.id !== user?.id);
+
+  // Auto-select first other backoffice if none selected
+  React.useEffect(() => {
+    if (!selectedOtherBackoffice && otherBackofficeUsers.length > 0) {
+      setSelectedOtherBackoffice(otherBackofficeUsers[0].id);
+    }
+  }, [otherBackofficeUsers, selectedOtherBackoffice]);
+
+  const { data: otherBackofficeData } = useQuery({
+    queryKey: ['other-backoffice-tickets', selectedOtherBackoffice, otherBackofficePage, filterMonth],
+    queryFn: async () => {
+      if (!selectedOtherBackoffice) return { tickets: [] as Ticket[], count: 0 };
+      const from = otherBackofficePage * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      let q = supabase
+        .from('tickets')
+        .select(TICKET_COLUMNS, { count: 'exact' })
+        .eq('assigned_analyst_id', selectedOtherBackoffice);
+      if (monthDateRange) {
+        q = q.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+      }
+      const { data, count } = await q.order('created_at', { ascending: false }).range(from, to);
+      return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
+    },
+    enabled: !!selectedOtherBackoffice,
+    staleTime: 30_000,
+  });
+
   const { data: allMyFinished = [] } = useQuery({
     queryKey: ['backoffice-all-finished-meta', user?.id, filterMonth],
     queryFn: async () => {
