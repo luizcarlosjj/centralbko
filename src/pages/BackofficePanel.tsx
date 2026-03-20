@@ -327,6 +327,7 @@ const AnalystPanel = () => {
     queryClient.invalidateQueries({ queryKey: ['backoffice-unassigned-tickets'] });
     queryClient.invalidateQueries({ queryKey: ['backoffice-all-finished-meta'] });
     queryClient.invalidateQueries({ queryKey: ['backoffice-team-finished-meta'] });
+    queryClient.invalidateQueries({ queryKey: ['other-backoffice-tickets'] });
   }, [queryClient]);
 
   useEffect(() => {
