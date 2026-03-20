@@ -1003,6 +1003,120 @@ const AnalystPanel = () => {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {otherBackofficeUsers.length > 0 && (
+            <TabsContent value="others">
+              <Card>
+                <CardContent className="pt-6 space-y-4">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Label className="text-sm font-medium">Backoffice:</Label>
+                    <div className="flex gap-2 flex-wrap">
+                      {otherBackofficeUsers.map(u => (
+                        <Button
+                          key={u.id}
+                          size="sm"
+                          variant={selectedOtherBackoffice === u.id ? 'default' : 'outline'}
+                          onClick={() => { setSelectedOtherBackoffice(u.id); setOtherBackofficePage(0); }}
+                        >
+                          {u.name}
+                        </Button>
+                      ))}
+                    </div>
+                    {otherBackofficeData && (
+                      <span className="text-xs text-muted-foreground ml-auto">{otherBackofficeData.count} chamado(s)</span>
+                    )}
+                  </div>
+
+                  {!otherBackofficeData || otherBackofficeData.tickets.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-8 text-center">Nenhum chamado encontrado</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead></TableHead>
+                          <SortableHead col="id">ID</SortableHead>
+                          <SortableHead col="base_name">Base</SortableHead>
+                          <SortableHead col="requester_name">Solicitante</SortableHead>
+                          <SortableHead col="priority">Prioridade</SortableHead>
+                          <TableHead>Complexidade</TableHead>
+                          <TableHead>Tipo</TableHead>
+                          <SortableHead col="status">Status</SortableHead>
+                          <TableHead>Anexo</TableHead>
+                          <SortableHead col="total_execution_seconds">Tempo</SortableHead>
+                          <SortableHead col="created_at">Data</SortableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {otherBackofficeData.tickets.map(ticket => (
+                          <React.Fragment key={ticket.id}>
+                            <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
+                              <TableCell>
+                                {expandedRows.has(ticket.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
+                              <TableCell>{ticket.base_name}</TableCell>
+                              <TableCell>{ticket.requester_name}</TableCell>
+                              <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                              <TableCell>
+                                {(ticket as any).complexity ? (
+                                  <Badge variant="outline" className="text-xs">{COMPLEXITY_LABELS[(ticket as any).complexity as keyof typeof COMPLEXITY_LABELS] || (ticket as any).complexity}</Badge>
+                                ) : <span className="text-xs text-muted-foreground">—</span>}
+                              </TableCell>
+                              <TableCell>{getTypeLabel(ticket.type)}</TableCell>
+                              <TableCell><Badge variant="outline" className={statusColor[ticket.status] || 'bg-muted/50 text-muted-foreground'}>{STATUS_LABELS[ticket.status] || ticket.status}</Badge></TableCell>
+                              <TableCell><AttachmentDialog attachmentUrl={ticket.attachment_url} /></TableCell>
+                              <TableCell>
+                                {ticket.status === 'finalizado' ? (
+                                  <span className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</span>
+                                ) : (
+                                  <LiveTimer ticket={ticket} />
+                                )}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {new Date(ticket.created_at).toLocaleDateString('pt-BR')} {new Date(ticket.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                              </TableCell>
+                            </TableRow>
+                            {expandedRows.has(ticket.id) && (
+                              <TableRow>
+                                <TableCell colSpan={11} className="bg-muted/30 p-4">
+                                  {ticket.description && (
+                                    <div className="mb-3">
+                                      <p className="text-sm font-medium mb-1">Descrição</p>
+                                      <p className="text-xs text-muted-foreground bg-background rounded p-2 border">{ticket.description}</p>
+                                    </div>
+                                  )}
+                                  <p className="text-sm font-medium mb-2">Histórico de Pausas</p>
+                                  {(pauseLogs[ticket.id] || []).length === 0 ? (
+                                    <p className="text-xs text-muted-foreground">Nenhuma pausa registrada</p>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      {(pauseLogs[ticket.id] || []).map(log => (
+                                        <div key={log.id} className="text-xs border rounded p-2 bg-background">
+                                          <div className="flex justify-between">
+                                            <span>Início: {new Date(log.pause_started_at).toLocaleString('pt-BR')}</span>
+                                            <span>Duração: {log.pause_ended_at ? formatTime(log.paused_seconds) : 'Em andamento'}</span>
+                                          </div>
+                                          {pauseReasonNames[log.pause_reason_id] && (
+                                            <p className="mt-1"><span className="text-muted-foreground">Motivo:</span> <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 text-xs">{pauseReasonNames[log.pause_reason_id]}</Badge></p>
+                                          )}
+                                          {log.description_text && <p className="mt-1 text-muted-foreground">{log.description_text}</p>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                  <PaginationControls page={otherBackofficePage} totalPages={Math.ceil((otherBackofficeData?.count || 0) / PAGE_SIZE)} setPage={setOtherBackofficePage} />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </div>
 
