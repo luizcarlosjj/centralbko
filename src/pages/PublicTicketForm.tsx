@@ -262,6 +262,15 @@ const PublicTicketForm = () => {
                   )}
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label>Complexidade <span className="text-destructive">*</span></Label>
+                <Select value={complexity} onValueChange={v => setComplexity(v as TicketComplexity)}>
+                  <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(COMPLEXITY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Nível do Setup <span className="text-destructive">*</span></Label>
