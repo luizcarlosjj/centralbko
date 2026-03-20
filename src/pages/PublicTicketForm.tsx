@@ -148,7 +148,7 @@ const PublicTicketForm = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!priority || !type || !requesterName || !setupLevel || !team || attachments.length === 0) return;
+    if (!priority || !type || !requesterName || !setupLevel || !team || !complexity || attachments.length === 0) return;
     setSubmitting(true);
 
     try {
