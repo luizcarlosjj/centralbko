@@ -63,6 +63,8 @@ const AnalystPanel = () => {
   const [assignDialogTicket, setAssignDialogTicket] = useState<Ticket | null>(null);
   const [finalizeDialogTicket, setFinalizeDialogTicket] = useState<Ticket | null>(null);
   const [selectedBackoffice, setSelectedBackoffice] = useState('');
+  const [selectedOtherBackoffice, setSelectedOtherBackoffice] = useState<string | null>(null);
+  const [otherBackofficePage, setOtherBackofficePage] = useState(0);
 
   // Filters
   const [filterStatus, setFilterStatus] = useState<string>('all');
