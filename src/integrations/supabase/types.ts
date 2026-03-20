@@ -398,6 +398,7 @@ export type Database = {
           assigned_analyst_id: string | null
           attachment_url: string | null
           base_name: string
+          complexity: string | null
           created_at: string
           description: string
           finished_at: string | null
@@ -418,6 +419,7 @@ export type Database = {
           assigned_analyst_id?: string | null
           attachment_url?: string | null
           base_name: string
+          complexity?: string | null
           created_at?: string
           description: string
           finished_at?: string | null
@@ -438,6 +440,7 @@ export type Database = {
           assigned_analyst_id?: string | null
           attachment_url?: string | null
           base_name?: string
+          complexity?: string | null
           created_at?: string
           description?: string
           finished_at?: string | null
