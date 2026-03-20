@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Send, Paperclip, X, FileSpreadsheet, Plus } from 'lucide-react';
-import { PRIORITY_LABELS, type TicketPriority } from '@/types/tickets';
+import { PRIORITY_LABELS, COMPLEXITY_LABELS, type TicketPriority, type TicketComplexity } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
 
 const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.pdf', '.zip', '.doc', '.docx', '.ppt', '.pptx', '.txt', '.rtf', '.odt', '.ods', '.odp', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.tif', '.rar', '.7z'];
