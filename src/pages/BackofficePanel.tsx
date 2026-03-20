@@ -755,11 +755,12 @@ const AnalystPanel = () => {
                     <TableHeader>
                       <TableRow>
                         <TableHead></TableHead>
-                        <SortableHead col="id">ID</SortableHead>
-                        <SortableHead col="base_name">Base</SortableHead>
-                        <SortableHead col="requester_name">Solicitante</SortableHead>
-                        <SortableHead col="priority">Prioridade</SortableHead>
-                        <TableHead>Tipo</TableHead>
+                         <SortableHead col="id">ID</SortableHead>
+                         <SortableHead col="base_name">Base</SortableHead>
+                         <SortableHead col="requester_name">Solicitante</SortableHead>
+                         <SortableHead col="priority">Prioridade</SortableHead>
+                         <TableHead>Complexidade</TableHead>
+                         <TableHead>Tipo</TableHead>
                         <SortableHead col="status">Status</SortableHead>
                         <TableHead>Anexo</TableHead>
                         <SortableHead col="total_execution_seconds">Tempo</SortableHead>
