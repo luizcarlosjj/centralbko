@@ -927,6 +927,11 @@ const AnalystPanel = () => {
                             <TableCell>{ticket.base_name}</TableCell>
                             <TableCell>{ticket.requester_name}</TableCell>
                             <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                            <TableCell>
+                              {(ticket as any).complexity ? (
+                                <Badge variant="outline" className="text-xs">{COMPLEXITY_LABELS[(ticket as any).complexity as keyof typeof COMPLEXITY_LABELS] || (ticket as any).complexity}</Badge>
+                              ) : <span className="text-xs text-muted-foreground">—</span>}
+                            </TableCell>
                             <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                             <TableCell>
                               <AttachmentDialog attachmentUrl={ticket.attachment_url} />
