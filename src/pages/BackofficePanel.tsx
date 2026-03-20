@@ -641,6 +641,9 @@ const AnalystPanel = () => {
             <TabsTrigger value="unassigned">Não Atribuídos ({unassignedTotal})</TabsTrigger>
             <TabsTrigger value="open">Em Aberto ({openTotal})</TabsTrigger>
             <TabsTrigger value="finished">Finalizados ({finishedTotal})</TabsTrigger>
+            {otherBackofficeUsers.length > 0 && (
+              <TabsTrigger value="others">Outros Backoffices</TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="unassigned">
