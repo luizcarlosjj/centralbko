@@ -18,7 +18,7 @@ Deno.serve(async (req) => {
     );
 
     const body = await req.json();
-    const { base_name, requester_name, priority, type, setup_level, team, description, attachments } = body;
+    const { base_name, requester_name, priority, type, setup_level, team, description, attachments, complexity } = body;
 
     if (!base_name || !requester_name || !priority || !type || !setup_level || !team || !description) {
       return new Response(
