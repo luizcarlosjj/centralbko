@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Pause, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, UserPlus, HandMetal, Search, Target, PlayCircle, ArrowUpDown, ArrowUp, ArrowDown, Clock, MessageSquare, FileText, Download } from 'lucide-react';
-import { Ticket, STATUS_LABELS, PRIORITY_LABELS, TicketStatus, PauseLog, Profile } from '@/types/tickets';
+import { Ticket, STATUS_LABELS, PRIORITY_LABELS, COMPLEXITY_LABELS, TicketStatus, PauseLog, Profile } from '@/types/tickets';
 import PauseDialog from '@/components/PauseDialog';
 import LiveTimer from '@/components/LiveTimer';
 import { toast } from '@/hooks/use-toast';
@@ -25,7 +25,7 @@ import { format, subMonths, startOfMonth, endOfMonth, addDays, parse, eachMonthO
 import { ptBR } from 'date-fns/locale';
 import { Calendar as CalendarIcon } from 'lucide-react';
 
-const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, description';
+const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, description, complexity';
 const PAGE_SIZE = 20;
 
 const isImageUrl = (url: string) => {
@@ -63,6 +63,8 @@ const AnalystPanel = () => {
   const [assignDialogTicket, setAssignDialogTicket] = useState<Ticket | null>(null);
   const [finalizeDialogTicket, setFinalizeDialogTicket] = useState<Ticket | null>(null);
   const [selectedBackoffice, setSelectedBackoffice] = useState('');
+  const [selectedOtherBackoffice, setSelectedOtherBackoffice] = useState<string | null>(null);
+  const [otherBackofficePage, setOtherBackofficePage] = useState(0);
 
   // Filters
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -215,6 +217,35 @@ const AnalystPanel = () => {
     staleTime: 120_000,
   });
 
+  const otherBackofficeUsers = backofficeUsers.filter(u => u.id !== user?.id);
+
+  // Auto-select first other backoffice if none selected
+  React.useEffect(() => {
+    if (!selectedOtherBackoffice && otherBackofficeUsers.length > 0) {
+      setSelectedOtherBackoffice(otherBackofficeUsers[0].id);
+    }
+  }, [otherBackofficeUsers, selectedOtherBackoffice]);
+
+  const { data: otherBackofficeData } = useQuery({
+    queryKey: ['other-backoffice-tickets', selectedOtherBackoffice, otherBackofficePage, filterMonth],
+    queryFn: async () => {
+      if (!selectedOtherBackoffice) return { tickets: [] as Ticket[], count: 0 };
+      const from = otherBackofficePage * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      let q = supabase
+        .from('tickets')
+        .select(TICKET_COLUMNS, { count: 'exact' })
+        .eq('assigned_analyst_id', selectedOtherBackoffice);
+      if (monthDateRange) {
+        q = q.gte('created_at', monthDateRange.start).lt('created_at', monthDateRange.end);
+      }
+      const { data, count } = await q.order('created_at', { ascending: false }).range(from, to);
+      return { tickets: (data || []) as unknown as Ticket[], count: count || 0 };
+    },
+    enabled: !!selectedOtherBackoffice,
+    staleTime: 30_000,
+  });
+
   const { data: allMyFinished = [] } = useQuery({
     queryKey: ['backoffice-all-finished-meta', user?.id, filterMonth],
     queryFn: async () => {
@@ -296,6 +327,7 @@ const AnalystPanel = () => {
     queryClient.invalidateQueries({ queryKey: ['backoffice-unassigned-tickets'] });
     queryClient.invalidateQueries({ queryKey: ['backoffice-all-finished-meta'] });
     queryClient.invalidateQueries({ queryKey: ['backoffice-team-finished-meta'] });
+    queryClient.invalidateQueries({ queryKey: ['other-backoffice-tickets'] });
   }, [queryClient]);
 
   useEffect(() => {
@@ -610,6 +642,9 @@ const AnalystPanel = () => {
             <TabsTrigger value="unassigned">Não Atribuídos ({unassignedTotal})</TabsTrigger>
             <TabsTrigger value="open">Em Aberto ({openTotal})</TabsTrigger>
             <TabsTrigger value="finished">Finalizados ({finishedTotal})</TabsTrigger>
+            {otherBackofficeUsers.length > 0 && (
+              <TabsTrigger value="others">Outros Backoffices</TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="unassigned">
@@ -623,11 +658,12 @@ const AnalystPanel = () => {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <SortableHead col="id">ID</SortableHead>
-                        <SortableHead col="base_name">Base</SortableHead>
-                        <SortableHead col="requester_name">Solicitante</SortableHead>
-                        <SortableHead col="priority">Prioridade</SortableHead>
-                        <TableHead>Tipo</TableHead>
+                         <SortableHead col="id">ID</SortableHead>
+                         <SortableHead col="base_name">Base</SortableHead>
+                         <SortableHead col="requester_name">Solicitante</SortableHead>
+                         <SortableHead col="priority">Prioridade</SortableHead>
+                         <TableHead>Complexidade</TableHead>
+                         <TableHead>Tipo</TableHead>
                         <TableHead>Tempo</TableHead>
                         <SortableHead col="created_at">Data</SortableHead>
                         <TableHead>Ações</TableHead>
@@ -640,6 +676,11 @@ const AnalystPanel = () => {
                           <TableCell>{ticket.base_name}</TableCell>
                           <TableCell>{ticket.requester_name}</TableCell>
                           <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                          <TableCell>
+                            {(ticket as any).complexity ? (
+                              <Badge variant="outline" className="text-xs">{COMPLEXITY_LABELS[(ticket as any).complexity as keyof typeof COMPLEXITY_LABELS] || (ticket as any).complexity}</Badge>
+                            ) : <span className="text-xs text-muted-foreground">—</span>}
+                          </TableCell>
                           <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                           <TableCell><LiveTimer ticket={ticket} /></TableCell>
                           <TableCell className="text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleDateString('pt-BR')} {new Date(ticket.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</TableCell>
@@ -720,11 +761,12 @@ const AnalystPanel = () => {
                     <TableHeader>
                       <TableRow>
                         <TableHead></TableHead>
-                        <SortableHead col="id">ID</SortableHead>
-                        <SortableHead col="base_name">Base</SortableHead>
-                        <SortableHead col="requester_name">Solicitante</SortableHead>
-                        <SortableHead col="priority">Prioridade</SortableHead>
-                        <TableHead>Tipo</TableHead>
+                         <SortableHead col="id">ID</SortableHead>
+                         <SortableHead col="base_name">Base</SortableHead>
+                         <SortableHead col="requester_name">Solicitante</SortableHead>
+                         <SortableHead col="priority">Prioridade</SortableHead>
+                         <TableHead>Complexidade</TableHead>
+                         <TableHead>Tipo</TableHead>
                         <SortableHead col="status">Status</SortableHead>
                         <TableHead>Anexo</TableHead>
                         <SortableHead col="total_execution_seconds">Tempo</SortableHead>
@@ -743,6 +785,11 @@ const AnalystPanel = () => {
                             <TableCell>{ticket.base_name}</TableCell>
                             <TableCell>{ticket.requester_name}</TableCell>
                             <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                            <TableCell>
+                              {(ticket as any).complexity ? (
+                                <Badge variant="outline" className="text-xs">{COMPLEXITY_LABELS[(ticket as any).complexity as keyof typeof COMPLEXITY_LABELS] || (ticket as any).complexity}</Badge>
+                              ) : <span className="text-xs text-muted-foreground">—</span>}
+                            </TableCell>
                             <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                             <TableCell><Badge variant="outline" className={statusColor[ticket.status]}>{STATUS_LABELS[ticket.status]}</Badge></TableCell>
                             <TableCell>
@@ -861,8 +908,9 @@ const AnalystPanel = () => {
                         <SortableHead col="id">ID</SortableHead>
                         <SortableHead col="base_name">Base</SortableHead>
                         <SortableHead col="requester_name">Solicitante</SortableHead>
-                        <SortableHead col="priority">Prioridade</SortableHead>
-                        <TableHead>Tipo</TableHead>
+                         <SortableHead col="priority">Prioridade</SortableHead>
+                         <TableHead>Complexidade</TableHead>
+                         <TableHead>Tipo</TableHead>
                         <TableHead>Anexo</TableHead>
                         <SortableHead col="total_execution_seconds">Execução</SortableHead>
                         <TableHead>Pausado</TableHead>
@@ -880,6 +928,11 @@ const AnalystPanel = () => {
                             <TableCell>{ticket.base_name}</TableCell>
                             <TableCell>{ticket.requester_name}</TableCell>
                             <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                            <TableCell>
+                              {(ticket as any).complexity ? (
+                                <Badge variant="outline" className="text-xs">{COMPLEXITY_LABELS[(ticket as any).complexity as keyof typeof COMPLEXITY_LABELS] || (ticket as any).complexity}</Badge>
+                              ) : <span className="text-xs text-muted-foreground">—</span>}
+                            </TableCell>
                             <TableCell>{getTypeLabel(ticket.type)}</TableCell>
                             <TableCell>
                               <AttachmentDialog attachmentUrl={ticket.attachment_url} />
@@ -969,6 +1022,120 @@ const AnalystPanel = () => {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {otherBackofficeUsers.length > 0 && (
+            <TabsContent value="others">
+              <Card>
+                <CardContent className="pt-6 space-y-4">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Label className="text-sm font-medium">Backoffice:</Label>
+                    <div className="flex gap-2 flex-wrap">
+                      {otherBackofficeUsers.map(u => (
+                        <Button
+                          key={u.id}
+                          size="sm"
+                          variant={selectedOtherBackoffice === u.id ? 'default' : 'outline'}
+                          onClick={() => { setSelectedOtherBackoffice(u.id); setOtherBackofficePage(0); }}
+                        >
+                          {u.name}
+                        </Button>
+                      ))}
+                    </div>
+                    {otherBackofficeData && (
+                      <span className="text-xs text-muted-foreground ml-auto">{otherBackofficeData.count} chamado(s)</span>
+                    )}
+                  </div>
+
+                  {!otherBackofficeData || otherBackofficeData.tickets.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-8 text-center">Nenhum chamado encontrado</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead></TableHead>
+                          <SortableHead col="id">ID</SortableHead>
+                          <SortableHead col="base_name">Base</SortableHead>
+                          <SortableHead col="requester_name">Solicitante</SortableHead>
+                          <SortableHead col="priority">Prioridade</SortableHead>
+                          <TableHead>Complexidade</TableHead>
+                          <TableHead>Tipo</TableHead>
+                          <SortableHead col="status">Status</SortableHead>
+                          <TableHead>Anexo</TableHead>
+                          <SortableHead col="total_execution_seconds">Tempo</SortableHead>
+                          <SortableHead col="created_at">Data</SortableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {otherBackofficeData.tickets.map(ticket => (
+                          <React.Fragment key={ticket.id}>
+                            <TableRow className="cursor-pointer" onClick={() => toggleExpand(ticket.id)}>
+                              <TableCell>
+                                {expandedRows.has(ticket.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">{ticket.id.slice(0, 8).toUpperCase()}</TableCell>
+                              <TableCell>{ticket.base_name}</TableCell>
+                              <TableCell>{ticket.requester_name}</TableCell>
+                              <TableCell><Badge variant="outline" className={priorityColor[ticket.priority]}>{PRIORITY_LABELS[ticket.priority]}</Badge></TableCell>
+                              <TableCell>
+                                {(ticket as any).complexity ? (
+                                  <Badge variant="outline" className="text-xs">{COMPLEXITY_LABELS[(ticket as any).complexity as keyof typeof COMPLEXITY_LABELS] || (ticket as any).complexity}</Badge>
+                                ) : <span className="text-xs text-muted-foreground">—</span>}
+                              </TableCell>
+                              <TableCell>{getTypeLabel(ticket.type)}</TableCell>
+                              <TableCell><Badge variant="outline" className={statusColor[ticket.status] || 'bg-muted/50 text-muted-foreground'}>{STATUS_LABELS[ticket.status] || ticket.status}</Badge></TableCell>
+                              <TableCell><AttachmentDialog attachmentUrl={ticket.attachment_url} /></TableCell>
+                              <TableCell>
+                                {ticket.status === 'finalizado' ? (
+                                  <span className="font-mono text-xs">{formatTime(ticket.total_execution_seconds || 0)}</span>
+                                ) : (
+                                  <LiveTimer ticket={ticket} />
+                                )}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {new Date(ticket.created_at).toLocaleDateString('pt-BR')} {new Date(ticket.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                              </TableCell>
+                            </TableRow>
+                            {expandedRows.has(ticket.id) && (
+                              <TableRow>
+                                <TableCell colSpan={11} className="bg-muted/30 p-4">
+                                  {ticket.description && (
+                                    <div className="mb-3">
+                                      <p className="text-sm font-medium mb-1">Descrição</p>
+                                      <p className="text-xs text-muted-foreground bg-background rounded p-2 border">{ticket.description}</p>
+                                    </div>
+                                  )}
+                                  <p className="text-sm font-medium mb-2">Histórico de Pausas</p>
+                                  {(pauseLogs[ticket.id] || []).length === 0 ? (
+                                    <p className="text-xs text-muted-foreground">Nenhuma pausa registrada</p>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      {(pauseLogs[ticket.id] || []).map(log => (
+                                        <div key={log.id} className="text-xs border rounded p-2 bg-background">
+                                          <div className="flex justify-between">
+                                            <span>Início: {new Date(log.pause_started_at).toLocaleString('pt-BR')}</span>
+                                            <span>Duração: {log.pause_ended_at ? formatTime(log.paused_seconds) : 'Em andamento'}</span>
+                                          </div>
+                                          {pauseReasonNames[log.pause_reason_id] && (
+                                            <p className="mt-1"><span className="text-muted-foreground">Motivo:</span> <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20 text-xs">{pauseReasonNames[log.pause_reason_id]}</Badge></p>
+                                          )}
+                                          {log.description_text && <p className="mt-1 text-muted-foreground">{log.description_text}</p>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                  <PaginationControls page={otherBackofficePage} totalPages={Math.ceil((otherBackofficeData?.count || 0) / PAGE_SIZE)} setPage={setOtherBackofficePage} />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </div>
 

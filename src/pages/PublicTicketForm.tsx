@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Send, Paperclip, X, FileSpreadsheet, ArrowLeft, Headphones, Plus, FileText, FileArchive, File } from 'lucide-react';
-import { PRIORITY_LABELS, type TicketPriority } from '@/types/tickets';
+import { PRIORITY_LABELS, COMPLEXITY_LABELS, type TicketPriority, type TicketComplexity } from '@/types/tickets';
 import { toast } from '@/hooks/use-toast';
 
 const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.pdf', '.zip', '.doc', '.docx', '.ppt', '.pptx', '.txt', '.rtf', '.odt', '.ods', '.odp', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.tif', '.rar', '.7z'];
@@ -23,6 +23,7 @@ const PublicTicketForm = () => {
   const [baseName, setBaseName] = useState('');
   const [requesterName, setRequesterName] = useState('');
   const [priority, setPriority] = useState<TicketPriority | ''>('');
+  const [complexity, setComplexity] = useState<TicketComplexity | ''>('');
   const [type, setType] = useState('');
   const [setupLevel, setSetupLevel] = useState('');
   const [team, setTeam] = useState('');
@@ -147,7 +148,7 @@ const PublicTicketForm = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!priority || !type || !requesterName || !setupLevel || !team || attachments.length === 0) return;
+    if (!priority || !type || !requesterName || !setupLevel || !team || !complexity || attachments.length === 0) return;
     setSubmitting(true);
 
     try {
@@ -163,6 +164,7 @@ const PublicTicketForm = () => {
         base_name: baseName,
         requester_name: requesterName,
         priority,
+        complexity,
         type,
         setup_level: setupLevel,
         team,
@@ -260,6 +262,15 @@ const PublicTicketForm = () => {
                   )}
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label>Complexidade <span className="text-destructive">*</span></Label>
+                <Select value={complexity} onValueChange={v => setComplexity(v as TicketComplexity)}>
+                  <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(COMPLEXITY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Nível do Setup <span className="text-destructive">*</span></Label>
@@ -329,7 +340,7 @@ const PublicTicketForm = () => {
                 {fileError && <p className="text-sm text-destructive">{fileError}</p>}
                 <p className="text-xs text-muted-foreground">{attachments.length}/{MAX_FILES} arquivos</p>
               </div>
-              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || !requesterName || !setupLevel || !team || attachments.length === 0}>
+              <Button type="submit" className="w-full" disabled={submitting || !priority || !type || !requesterName || !setupLevel || !team || !complexity || attachments.length === 0}>
                 <Send className="mr-2 h-4 w-4" />
                 {submitting ? 'Enviando...' : 'Enviar Chamado'}
               </Button>

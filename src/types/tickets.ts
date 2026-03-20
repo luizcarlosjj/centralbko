@@ -90,6 +90,17 @@ export interface PauseEvidence {
   created_at: string;
 }
 
+export type TicketComplexity = 'facil_rapido' | 'facil_demorado' | 'medio_rapido' | 'medio_demorado' | 'dificil_rapido' | 'dificil_demorado';
+
+export const COMPLEXITY_LABELS: Record<TicketComplexity, string> = {
+  facil_rapido: 'Fácil-Rápido',
+  facil_demorado: 'Fácil-Demorado',
+  medio_rapido: 'Médio-Rápido',
+  medio_demorado: 'Médio-Demorado',
+  dificil_rapido: 'Difícil-Rápido',
+  dificil_demorado: 'Difícil-Demorado',
+};
+
 export const PRIORITY_LABELS: Record<TicketPriority, string> = {
   baixa: 'Baixa',
   media: 'Média',
