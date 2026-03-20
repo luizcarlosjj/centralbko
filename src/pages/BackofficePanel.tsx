@@ -25,7 +25,7 @@ import { format, subMonths, startOfMonth, endOfMonth, addDays, parse, eachMonthO
 import { ptBR } from 'date-fns/locale';
 import { Calendar as CalendarIcon } from 'lucide-react';
 
-const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, description';
+const TICKET_COLUMNS = 'id, base_name, requester_name, priority, type, status, total_execution_seconds, total_paused_seconds, created_at, started_at, finished_at, pause_started_at, assigned_analyst_id, attachment_url, description, complexity';
 const PAGE_SIZE = 20;
 
 const isImageUrl = (url: string) => {
