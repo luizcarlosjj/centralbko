@@ -657,11 +657,12 @@ const AnalystPanel = () => {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <SortableHead col="id">ID</SortableHead>
-                        <SortableHead col="base_name">Base</SortableHead>
-                        <SortableHead col="requester_name">Solicitante</SortableHead>
-                        <SortableHead col="priority">Prioridade</SortableHead>
-                        <TableHead>Tipo</TableHead>
+                         <SortableHead col="id">ID</SortableHead>
+                         <SortableHead col="base_name">Base</SortableHead>
+                         <SortableHead col="requester_name">Solicitante</SortableHead>
+                         <SortableHead col="priority">Prioridade</SortableHead>
+                         <TableHead>Complexidade</TableHead>
+                         <TableHead>Tipo</TableHead>
                         <TableHead>Tempo</TableHead>
                         <SortableHead col="created_at">Data</SortableHead>
                         <TableHead>Ações</TableHead>
