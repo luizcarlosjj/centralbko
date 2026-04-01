@@ -394,8 +394,14 @@ const MetricsDashboard = () => {
                     <span>Exec. média: <span className="font-medium text-foreground">{formatTime(b.tempoMedio)}</span></span>
                     <span>Pausa média: <span className="font-medium text-foreground">{formatTime(b.tempoPausaMedio)}</span></span>
                   </div>
-                  <div className="text-xs text-muted-foreground">
+                  <div className="flex justify-between text-xs text-muted-foreground">
                     <span>{b.within48h} de {b.finalizados} concluídos em até 2 dias úteis</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs border-t pt-2">
+                    <span className="text-muted-foreground">Taxa de Conclusão:</span>
+                    <Badge variant={b.total > 0 && (b.finalizados / b.total) * 100 >= 80 ? 'default' : 'secondary'}>
+                      {b.total > 0 ? ((b.finalizados / b.total) * 100).toFixed(1) : '0.0'}%
+                    </Badge>
                   </div>
                 </div>
               ))}
