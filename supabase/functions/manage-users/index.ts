@@ -85,7 +85,17 @@ Deno.serve(async (req) => {
       });
 
       if (createError) {
-        return new Response(JSON.stringify({ error: createError.message }), {
+        let friendlyMessage = createError.message;
+        if (createError.message?.toLowerCase().includes("already been registered") || 
+            createError.message?.toLowerCase().includes("already registered") ||
+            (createError as any).code === "email_exists") {
+          friendlyMessage = `Já existe um usuário cadastrado com o email "${email}". Use outro email ou exclua o usuário existente antes de tentar novamente.`;
+        } else if (createError.message?.toLowerCase().includes("password")) {
+          friendlyMessage = "A senha não atende aos requisitos mínimos (mínimo 6 caracteres).";
+        } else if (createError.message?.toLowerCase().includes("invalid email")) {
+          friendlyMessage = "O email informado é inválido.";
+        }
+        return new Response(JSON.stringify({ error: friendlyMessage }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
